@@ -1,0 +1,521 @@
+import 'dart:math';
+
+import 'package:collection/collection.dart';
+import 'package:fixnum/fixnum.dart';
+import 'package:flutter/material.dart';
+import 'package:logging/logging.dart';
+import 'package:one_dollar_unistroke_recognizer/one_dollar_unistroke_recognizer.dart';
+import 'package:perfect_freehand/perfect_freehand.dart';
+import 'package:saber/components/canvas/_circle_stroke.dart';
+import 'package:saber/components/canvas/_rectangle_stroke.dart';
+import 'package:saber/data/extensions/list_extensions.dart';
+import 'package:saber/data/extensions/point_extensions.dart';
+import 'package:sbn/has_size.dart';
+import 'package:sbn/tool_id.dart';
+
+class Stroke {
+  static final log = Logger('Stroke');
+
+  @visibleForTesting
+  @protected
+  final List<PointVector> points = [];
+
+  bool get isEmpty => points.isEmpty;
+  int get length => points.length;
+
+  int pageIndex;
+  HasSize page;
+  final ToolId toolId;
+
+  static const defaultColor = Colors.black;
+  static const defaultPressureEnabled = true;
+
+  Color color;
+  bool pressureEnabled;
+  final StrokeOptions options;
+
+  List<Offset>? _lowQualityPolygon, _highQualityPolygon;
+  List<Offset> get lowQualityPolygon =>
+      _lowQualityPolygon ??= getPolygon(quality: .low);
+  List<Offset> get highQualityPolygon =>
+      _highQualityPolygon ??= getPolygon(quality: .high);
+
+  Path? _lowQualityPath, _highQualityPath;
+  Path get lowQualityPath =>
+      _lowQualityPath ??= getPath(lowQualityPolygon, smooth: false);
+  Path get highQualityPath => _highQualityPath ??= getPath(highQualityPolygon);
+
+  void shift(Offset offset) {
+    if (offset == .zero) return;
+
+    points.shift(offset);
+    _lowQualityPolygon?.shift(offset);
+    _highQualityPolygon?.shift(offset);
+    _lowQualityPath = _lowQualityPath?.shift(offset);
+    _highQualityPath = _highQualityPath?.shift(offset);
+  }
+
+  void markPolygonNeedsUpdating() {
+    _lowQualityPolygon = null;
+    _highQualityPolygon = null;
+    _lowQualityPath = null;
+    _highQualityPath = null;
+  }
+
+  new({
+    required this.color,
+    required this.pressureEnabled,
+    required this.options,
+    required this.pageIndex,
+    required this.page,
+    required this.toolId,
+  });
+
+  factory fromJson(
+    Map<String, dynamic> json, {
+    required int fileVersion,
+    required int pageIndex,
+    required HasSize page,
+  }) {
+    assert(json['i'] == pageIndex || json['i'] == null);
+    switch (json['shape'] as String?) {
+      case null:
+        break;
+      case 'circle':
+        return CircleStroke.fromJson(
+          json,
+          fileVersion: fileVersion,
+          pageIndex: pageIndex,
+          page: page,
+        );
+      case 'rect':
+        return RectangleStroke.fromJson(
+          json,
+          fileVersion: fileVersion,
+          pageIndex: pageIndex,
+          page: page,
+        );
+      default:
+        log.severe('Unknown shape: ${json['shape']}');
+    }
+
+    final ToolId toolId = .parsePenType(json['ty'], fallback: .fountainPen);
+
+    final options = StrokeOptions.fromJson(json);
+    final pressureEnabled = json['pe'] ?? defaultPressureEnabled;
+    if (toolId == .shapePen) {
+      // Set smoothing and streamline to 0 for ShapePen
+      // to mitigate https://github.com/saber-notes/saber/issues/1587
+      options.smoothing = 0;
+      options.streamline = 0;
+    }
+
+    final Color color;
+    switch (json['c']) {
+      case (final int value):
+        color = Color(value);
+      case (final Int64 value):
+        color = Color(value.toInt());
+      case null:
+        color = defaultColor;
+      default:
+        throw Exception(
+          'Invalid color value: (${json['c'].runtimeType}) ${json['c']}',
+        );
+    }
+
+    final offset = Offset(json['ox'] ?? 0, json['oy'] ?? 0);
+    final pointsJson = json['p'] as List<dynamic>;
+    final Iterable<PointVector> points;
+    if (fileVersion >= 13) {
+      points = pointsJson.map(
+        (point) => PointExtensions.fromBsonBinary(json: point, offset: offset),
+      );
+    } else {
+      points = pointsJson.map(
+        // ignore: deprecated_member_use_from_same_package
+        (point) => PointExtensions.fromJson(
+          json: Map<String, dynamic>.from(point),
+          offset: offset,
+        ),
+      );
+    }
+
+    return Stroke(
+      color: color,
+      pressureEnabled: pressureEnabled,
+      options: options,
+      pageIndex: pageIndex,
+      page: page,
+      toolId: toolId,
+    )..points.addAll(points);
+  }
+  Map<String, dynamic> toJson() {
+    // these json keys should not be the same as the ones in [StrokeOptions.toJson]
+    return {
+      'shape': null,
+      'p': points
+          .where((point) => point.isFinite)
+          .map((PointVector point) => point.toBsonBinary())
+          .toList(),
+      'i': pageIndex,
+      'ty': toolId.id,
+      'pe': pressureEnabled,
+      'c': color.toARGB32(),
+    }..addAll(options.toJson());
+  }
+
+  void addPoint(Offset point, [double? pressure]) {
+    if (!pressureEnabled) {
+      pressure = null;
+    } else if (pressure != null) {
+      options.simulatePressure = false;
+    }
+
+    points.add(PointVector(point.dx, point.dy, pressure));
+    markPolygonNeedsUpdating();
+  }
+
+  void addPoints(List<Offset> points) {
+    for (final point in points) {
+      addPoint(point);
+    }
+  }
+
+  void popFirstPoint() {
+    points.removeAt(0);
+    markPolygonNeedsUpdating();
+  }
+
+  /// Points that are closer than this
+  /// threshold multiplied by the stroke's size
+  /// will be counted as duplicates.
+  static const _optimisePointsThreshold = 0.1;
+
+  /// Removes points that are too close together. See [_optimisePointsThreshold].
+  ///
+  /// This function is idempotent, so running it multiple times
+  /// will not change the result.
+  ///
+  /// This function does not change [_polygonNeedsUpdating].
+  void optimisePoints({double thresholdMultiplier = _optimisePointsThreshold}) {
+    if (points.length <= 3) return;
+
+    final minDistance = options.size * thresholdMultiplier;
+
+    // Remove points with null pressure because they were duplicates
+    points.removeWhere((point) => point.pressure == null);
+
+    for (int i = 1; i < points.length - 1; i++) {
+      final point = points[i];
+      final prev = points[i - 1];
+      final next = points[i + 1];
+
+      if (prev.distanceSquaredTo(point) < minDistance * minDistance &&
+          point.distanceSquaredTo(next) < minDistance * minDistance) {
+        points.removeAt(i);
+        i--;
+      }
+    }
+  }
+
+  @protected
+  List<Offset> getPolygon({required StrokeQuality quality}) {
+    if (!pressureEnabled) {
+      options.simulatePressure = false;
+    }
+    // The fountain pen derives its width from the nib model below,
+    // so it never simulates (or remembers) pressure.
+    final useNib = toolId == .fountainPen;
+    final rememberSimulatedPressure =
+        !useNib &&
+        quality == .high &&
+        options.simulatePressure &&
+        options.isComplete;
+
+    final skipped = skipPoints(points, quality.N);
+    final qualityOptions = switch (quality) {
+      .low => options.copyWith(
+        simulatePressure: false,
+        smoothing: 0,
+        streamline: 0,
+      ),
+      .high => options,
+    };
+
+    final polygon = useNib
+        ? getStroke(
+            _applyNibWidths(skipped),
+            // radius = size * (0.5 - thinning * (0.5 - pressure)), so with
+            // thinning 1 the diameter is size * 2 * pressure.
+            options: qualityOptions.copyWith(
+              simulatePressure: false,
+              thinning: 1.0,
+            ),
+          )
+        : getStroke(
+            skipped,
+            options: qualityOptions,
+            rememberSimulatedPressure: rememberSimulatedPressure,
+          );
+
+    if (rememberSimulatedPressure) {
+      // Ensure we don't simulate pressure again
+      options.simulatePressure = false;
+      // Remove points that are too close together
+      optimisePoints();
+    }
+
+    return polygon;
+  }
+
+  /// Nib angle in degrees, measured counter-clockwise from horizontal
+  /// (calligraphy convention). Strokes along the nib edge are thinnest;
+  /// strokes at right angles to it are thickest.
+  static const _nibAngleDegrees = 35.0;
+
+  /// Thinnest and thickest nib widths, as a multiple of [StrokeOptions.size].
+  static const _nibMinWidthRatio = 0.2;
+  static const _nibMaxWidthRatio = 1.0;
+
+  /// 0 = no smoothing, close to 1 = heavy smoothing of width changes.
+  static const _nibSmoothing = 0.6;
+
+  /// Segments shorter than this (in logical pixels) are treated as
+  /// "no movement" and hold the previous width instead of jumping.
+  static const _nibMinSegmentLength = 0.5;
+
+  /// Returns copies of [source] whose pressure encodes the nib width.
+  ///
+  /// Width depends only on the direction of movement relative to the nib
+  /// angle (smoothed over successive points). Stylus pressure is ignored.
+  /// Pressure is set to `ratio / 2` because, with thinning = 1, a pressure
+  /// of 0.5 gives a diameter of exactly [StrokeOptions.size].
+  List<PointVector> _applyNibWidths(List<PointVector> source) {
+    if (source.isEmpty) return source;
+
+    const midRatio = (_nibMinWidthRatio + _nibMaxWidthRatio) / 2;
+    const minSegmentSquared = _nibMinSegmentLength * _nibMinSegmentLength;
+    // Negated because screen y points down (counter-clockwise on screen).
+    final nibAngle = -_nibAngleDegrees * pi / 180;
+
+    // ratios[i] is the width for source[i + 1]; source[0] reuses ratios[0].
+    final ratios = <double>[];
+    double? smoothed;
+    for (var i = 1; i < source.length; i++) {
+      final dx = source[i].dx - source[i - 1].dx;
+      final dy = source[i].dy - source[i - 1].dy;
+
+      if (dx * dx + dy * dy >= minSegmentSquared) {
+        // |sin| is symmetric: moving along the nib edge -> 0 (thin),
+        // perpendicular to it -> 1 (thick), same in both directions.
+        final factor = sin(atan2(dy, dx) - nibAngle).abs();
+        final raw =
+            _nibMinWidthRatio +
+            (_nibMaxWidthRatio - _nibMinWidthRatio) * factor;
+        smoothed = smoothed == null
+            ? raw
+            : smoothed + (raw - smoothed) * (1 - _nibSmoothing);
+      }
+      ratios.add(smoothed ?? midRatio);
+    }
+
+    PointVector withRatio(PointVector p, double ratio) =>
+        PointVector(p.dx, p.dy, ratio / 2);
+
+    return [
+      withRatio(source.first, ratios.isEmpty ? midRatio : ratios.first),
+      for (var i = 1; i < source.length; i++)
+        withRatio(source[i], ratios[i - 1]),
+    ];
+  }
+
+  /// Returns a [Path] that represents the stroke.
+  ///
+  /// If [smooth] is true, and the stroke is complete,
+  /// the path will be a smooth curve between the points in [polygon].
+  ///
+  /// Otherwise, the path will use straight lines between each point
+  /// in [polygon] for performance.
+  @protected
+  Path getPath(List<Offset> polygon, {bool smooth = true}) {
+    if (smooth && options.isComplete) {
+      return smoothPathFromPolygon(polygon);
+    }
+
+    return Path()..addPolygon(polygon, true);
+  }
+
+  /// Returns a list with every Nth point in [points].
+  static List<PointVector> skipPoints(List<PointVector> points, int N) {
+    // Nothing is being skipped, just return [points].
+    if (N <= 1) return points;
+
+    // If we have too few points, skip less points
+    final divided = points.length / N;
+    const minDivided = 8;
+    if (divided < minDivided) {
+      N = (N * divided / minDivided).floor();
+      if (N <= 1) return points;
+    }
+
+    return [
+      for (int i = 0; i < points.length - 1; i += N) points[i],
+      points.last,
+    ];
+  }
+
+  static Path smoothPathFromPolygon(List<Offset> polygon) {
+    final path = Path();
+    path.moveTo(polygon.first.dx, polygon.first.dy);
+    for (int i = 1; i < polygon.length - 1; i++) {
+      final p1 = polygon[i];
+      final p2 = polygon[i + 1];
+      final mid = (p1 + p2) / 2;
+      path.quadraticBezierTo(p1.dx, p1.dy, mid.dx, mid.dy);
+    }
+    return path..close();
+  }
+
+  String toSvgPath() {
+    String toSvgPoint(Offset point) {
+      return '${point.dx} '
+          '${page.size.height - point.dy}';
+    }
+
+    // Remove NaN points, and convert to SVG coordinates
+    final svgPoints = highQualityPolygon
+        .where((offset) => offset.isFinite)
+        .map(toSvgPoint);
+
+    return svgPoints.isNotEmpty ? 'M${svgPoints.join('L')}' : '';
+  }
+
+  double get maxY {
+    return points.isEmpty ? 0 : points.map((point) => point.y).reduce(max);
+  }
+
+  /// The bounding box of this stroke's points, in logical pixels.
+  Rect get boundingBox {
+    if (points.isEmpty) return Rect.zero;
+    var minX = double.infinity, maxX = double.negativeInfinity;
+    var minY = double.infinity, maxY = double.negativeInfinity;
+    for (final point in points) {
+      if (point.dx < minX) minX = point.dx;
+      if (point.dx > maxX) maxX = point.dx;
+      if (point.dy < minY) minY = point.dy;
+      if (point.dy > maxY) maxY = point.dy;
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  /// The diagonal of this stroke's bounding box, in logical pixels.
+  /// Useful for size-based filters (e.g. shape snapping).
+  double get boundingBoxDiagonal {
+    final box = boundingBox;
+    return sqrt(box.width * box.width + box.height * box.height);
+  }
+
+  RecognizedUnistroke? detectShape() {
+    if (points.length < 3) return null;
+    return recognizeUnistroke(points);
+  }
+
+  /// Uses the one_dollar_unistroke_recognizer package
+  /// only to recognize straight lines.
+  ///
+  /// In addition, the line must be sufficiently long
+  /// relative to [options.size].
+  bool isStraightLine([int minLength = 5]) {
+    if (points.length < 3) return false;
+
+    final recognized = recognizeUnistroke(
+      points,
+      overrideReferenceUnistrokes: default$1Unistrokes
+          .where((unistroke) => unistroke.name == DefaultUnistrokeNames.line)
+          .toList(),
+    );
+    if (recognized == null) return false;
+    assert(recognized.name == DefaultUnistrokeNames.line);
+    if (recognized.score < 0.7) return false;
+
+    final sqrLength = points.first.distanceSquaredTo(points.last);
+    final sqrMinLength = minLength * minLength * options.size * options.size;
+    return sqrLength >= sqrMinLength;
+  }
+
+  /// Replaces the points in this stroke with a straight line.
+  ///
+  /// If the resulting line is close to horizontal or vertical,
+  /// it will be snapped to be exactly horizontal or vertical.
+  void convertToLine() {
+    assert(points.length >= 2);
+
+    // Use the average pressure
+    final pressure = points.map((point) => point.pressure ?? 0.5).average;
+    var firstPoint = PointVector.fromOffset(
+      offset: points.first,
+      pressure: pressure,
+    );
+    var lastPoint = PointVector.fromOffset(
+      offset: points.last,
+      pressure: pressure,
+    );
+
+    // Snap to the horizontal or vertical axis
+    (firstPoint, lastPoint) = snapLine(firstPoint, lastPoint);
+
+    points.clear();
+    points.add(firstPoint);
+    points.add(lastPoint);
+    points.add(lastPoint);
+    options.isComplete = true;
+    options.start.taperEnabled = false;
+    options.end.taperEnabled = false;
+  }
+
+  /// Snaps a line to either horizontal or vertical
+  /// if the angle is close enough.
+  static (PointVector firstPoint, PointVector lastPoint) snapLine(
+    PointVector firstPoint,
+    PointVector lastPoint,
+  ) {
+    final dx = (lastPoint.dx - firstPoint.dx).abs();
+    final dy = (lastPoint.dy - firstPoint.dy).abs();
+    final angle = atan2(dy, dx);
+
+    const snapAngle = 5 * pi / 180; // 5 degrees
+    if (angle < snapAngle) {
+      // snap to horizontal
+      return (
+        firstPoint,
+        PointVector(lastPoint.dx, firstPoint.dy, lastPoint.pressure),
+      );
+    } else if (angle > pi / 2 - snapAngle) {
+      // snap to vertical
+      return (
+        firstPoint,
+        PointVector(firstPoint.dx, lastPoint.dy, lastPoint.pressure),
+      );
+    } else {
+      return (firstPoint, lastPoint);
+    }
+  }
+
+  Stroke copy() => Stroke(
+    color: color,
+    pressureEnabled: pressureEnabled,
+    options: options.copyWith(),
+    pageIndex: pageIndex,
+    page: page,
+    toolId: toolId,
+  )..points.addAll(points);
+}
+
+enum StrokeQuality(
+  /// We use every Nth point for this quality level.
+  final int N,
+) {
+  low(4),
+  high(1)
+}
