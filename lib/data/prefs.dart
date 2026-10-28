@@ -244,7 +244,9 @@ class Stows {
   static StrokeOptions _strokeOptionsFromJson(Object json) =>
       StrokeOptions.fromJson(json as Map<String, dynamic>);
   final lastFountainPenOptions = PlainStow.json(
-        'lastFountainPenProperties',
+        // Key renamed so previously saved pen options don't override the
+        // new smoothing/streamline defaults.
+        'lastFountainPenProperties2',
         Pen.fountainPenOptions,
         fromJson: _strokeOptionsFromJson,
         volatile: !_isOnMainIsolate,

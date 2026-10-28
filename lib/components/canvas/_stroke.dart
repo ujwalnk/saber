@@ -41,8 +41,11 @@ class Stroke {
       _highQualityPolygon ??= getPolygon(quality: .high);
 
   Path? _lowQualityPath, _highQualityPath;
-  Path get lowQualityPath =>
-      _lowQualityPath ??= getPath(lowQualityPolygon, smooth: false);
+  Path get lowQualityPath => _lowQualityPath ??= getPath(
+    lowQualityPolygon,
+    // The fountain pen uses the same smooth curve at every zoom level.
+    smooth: toolId == .fountainPen,
+  );
   Path get highQualityPath => _highQualityPath ??= getPath(highQualityPolygon);
 
   void shift(Offset offset) {
@@ -233,15 +236,13 @@ class Stroke {
         options.simulatePressure &&
         options.isComplete;
 
-    final skipped = skipPoints(points, quality.N);
-    final qualityOptions = switch (quality) {
-      .low => options.copyWith(
-        simulatePressure: false,
-        smoothing: 0,
-        streamline: 0,
-      ),
-      .high => options,
-    };
+    // The fountain pen keeps every point and its smoothing at all zoom
+    // levels, like the pen_pal prototype. Other tools use the cheaper
+    // low-quality version when zoomed out.
+    final skipped = skipPoints(points, useNib ? 1 : quality.N);
+    final qualityOptions = (quality == .low && !useNib)
+        ? options.copyWith(simulatePressure: false, smoothing: 0, streamline: 0)
+        : options;
 
     final polygon = useNib
         ? getStroke(

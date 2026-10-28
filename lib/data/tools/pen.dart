@@ -197,7 +197,9 @@ class Pen extends Tool {
   /// (i.e. [StrokeOptions.toJson] does not include default values.)
   static final defaultOptions = StrokeOptions(size: 5);
 
-  static StrokeOptions get fountainPenOptions => defaultOptions.copyWith();
+  // Matches the pen_pal prototype: smoothing 0.5, streamline 0.35.
+  static StrokeOptions get fountainPenOptions =>
+      defaultOptions.copyWith(smoothing: 0.5, streamline: 0.35);
   static StrokeOptions get ballpointPenOptions => defaultOptions.copyWith();
   static StrokeOptions get shapePenOptions =>
       defaultOptions.copyWith(smoothing: 0, streamline: 0);
