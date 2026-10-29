@@ -52,7 +52,7 @@ class ToolbarIconButton extends StatelessWidget {
         if (states.contains(WidgetState.selected)) return selectedIconColor;
         return iconColor;
       }),
-      iconSize: const WidgetStatePropertyAll(20),
+      iconSize: const WidgetStatePropertyAll(24),
       fixedSize: const WidgetStatePropertyAll(Size(48, 48)),
       padding: const WidgetStatePropertyAll(EdgeInsets.zero),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,

@@ -2,16 +2,12 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:collapsible/collapsible.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:keybinder/keybinder.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:saber/components/theming/adaptive_icon.dart';
 import 'package:saber/components/theming/dynamic_material_app.dart';
-import 'package:saber/components/theming/uni_icon.dart';
 import 'package:saber/components/toolbar/color_bar.dart';
 import 'package:saber/components/toolbar/export_bar.dart';
 import 'package:saber/components/toolbar/pen_modal.dart';
@@ -29,6 +25,7 @@ import 'package:saber/data/tools/laser_pointer.dart';
 import 'package:saber/data/tools/pen.dart';
 import 'package:saber/data/tools/pencil.dart';
 import 'package:saber/data/tools/select.dart';
+import 'package:saber/data/tools/shape_pen.dart';
 import 'package:saber/i18n/strings.g.dart';
 
 class Toolbar extends StatefulWidget {
@@ -71,7 +68,7 @@ class Toolbar extends StatefulWidget {
   final VoidCallback duplicateSelection;
   final VoidCallback deleteSelection;
 
-  /// Whether the export bar is open. Toggled from the editor's top bar.
+  /// Whether the export bar is open. Opened from the editor's 3-dot menu.
   final ValueNotifier<bool> showExportOptions;
 
   final Future Function(BuildContext)? exportAsSba;
@@ -212,6 +209,19 @@ class _ToolbarState extends State<Toolbar> {
     return best;
   }
 
+  /// Material Symbols glyph used for the current pen in the toolbar.
+  static IconData _penSymbol(Pen pen) {
+    final icon = pen.icon;
+    if (icon == Pen.ballpointPenIcon) return Symbols.draw;
+    if (icon == ShapePen.shapePenIcon) return Symbols.shapes;
+    return Symbols.ink_pen;
+  }
+
+  /// A toolbar glyph: outlined normally, filled while its tool is selected.
+  Widget _toolIcon(IconData icon, {bool selected = false}) {
+    return Icon(icon, fill: selected ? 1 : 0);
+  }
+
   /// Subtle Samsung-style grip handle. Only this starts a drag —
   /// every tool button keeps its normal tap behavior. Uses Flutter's
   /// built-in Draggable so the floating preview is handled robustly.
@@ -222,15 +232,12 @@ class _ToolbarState extends State<Toolbar> {
     const liftAboveFinger = 90.0;
 
     Widget ghostBar() {
-      final brightness = Theme.brightnessOf(context);
       return Container(
         width: ghostWidth,
         height: ghostHeight,
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: brightness == .dark
-              ? const Color(0xFF252525)
-              : const Color(0xFFF2F2F4),
+          color: colorScheme.surfaceContainer,
           borderRadius: .circular(24),
           border: Border.all(color: colorScheme.primary, width: 2),
           boxShadow: [
@@ -315,6 +322,8 @@ class _ToolbarState extends State<Toolbar> {
         currentColor?.withAlpha(255).toARGB32() == color.toARGB32();
     const diameter = 30.0;
 
+    // Same 48x48 footprint as [ToolbarIconButton] so the presets sit on the
+    // same line, with the same spacing, as the other tools.
     return Padding(
       padding: padding,
       child: Tooltip(
@@ -333,26 +342,33 @@ class _ToolbarState extends State<Toolbar> {
                   setState(() {});
                 }
               : null,
-          child: Container(
-            width: diameter,
-            height: diameter,
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: isSelected ? colorScheme.primary : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: AnimatedOpacity(
-              opacity: enabled ? 1 : 0.4,
-              duration: const Duration(milliseconds: 200),
-              child: DecoratedBox(
+          child: SizedBox.square(
+            dimension: 48,
+            child: Center(
+              child: Container(
+                width: diameter,
+                height: diameter,
+                padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
-                  color: color.withInversion(invert),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: colorScheme.onSurface.withValues(alpha: 0.2),
+                    color: isSelected
+                        ? colorScheme.primary
+                        : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+                child: AnimatedOpacity(
+                  opacity: enabled ? 1 : 0.4,
+                  duration: const Duration(milliseconds: 200),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: color.withInversion(invert),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: colorScheme.onSurface.withValues(alpha: 0.2),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -446,7 +462,7 @@ class _ToolbarState extends State<Toolbar> {
     final isToolbarVertical =
         alignment == AxisDirection.left || alignment == AxisDirection.right;
     final dividerSide = BorderSide(
-      color: colorScheme.onSurface.withValues(alpha: 0.12),
+      color: colorScheme.outlineVariant,
     );
 
     final buttonPadding = isToolbarVertical
@@ -468,7 +484,8 @@ class _ToolbarState extends State<Toolbar> {
 
     // Every item that can appear in the toolbar. They are laid out below in
     // the order chosen in Settings > Customize toolbar ([ToolbarItem.visible]).
-    // Undo, redo, fullscreen and export live in the editor's top bar.
+    // Undo, redo and fullscreen live in the editor's top bar; export is in
+    // its 3-dot menu.
     final items = <ToolbarItem, List<Widget>>{
       ToolbarItem.pen: [
         ToolbarIconButton(
@@ -488,7 +505,10 @@ class _ToolbarState extends State<Toolbar> {
             }
           },
           padding: buttonPadding,
-          child: UniIcon(Pen.currentPen.icon, size: 16),
+          child: _toolIcon(
+            _penSymbol(Pen.currentPen),
+            selected: widget.currentTool == Pen.currentPen,
+          ),
         ),
       ],
       ToolbarItem.pencil: [
@@ -509,7 +529,10 @@ class _ToolbarState extends State<Toolbar> {
             }
           },
           padding: buttonPadding,
-          child: const FaIcon(Pencil.pencilIcon, size: 16),
+          child: _toolIcon(
+            Symbols.edit,
+            selected: widget.currentTool == Pencil.currentPencil,
+          ),
         ),
       ],
       ToolbarItem.highlighter: [
@@ -530,7 +553,10 @@ class _ToolbarState extends State<Toolbar> {
             }
           },
           padding: buttonPadding,
-          child: const FaIcon(Highlighter.highlighterIcon, size: 16),
+          child: _toolIcon(
+            Symbols.ink_highlighter,
+            selected: widget.currentTool == Highlighter.currentHighlighter,
+          ),
         ),
       ],
       ToolbarItem.quickColors: [
@@ -557,7 +583,7 @@ class _ToolbarState extends State<Toolbar> {
             );
           },
           child: currentColor == null
-              ? const Icon(Icons.palette)
+              ? const Icon(Symbols.palette)
               : Container(
                   width: 18,
                   height: 18,
@@ -581,18 +607,9 @@ class _ToolbarState extends State<Toolbar> {
             widget.setTool(Select.currentSelect);
           },
           padding: buttonPadding,
-          child: Icon(
-            CupertinoIcons.lasso,
-            shadows: !widget.readOnly
-                ? [
-                    BoxShadow(
-                      color: colorScheme.primary,
-                      blurRadius: 0.1,
-                      spreadRadius: 10,
-                      blurStyle: BlurStyle.solid,
-                    ),
-                  ]
-                : null,
+          child: _toolIcon(
+            Symbols.lasso_select,
+            selected: widget.currentTool is Select,
           ),
         ),
       ],
@@ -606,7 +623,10 @@ class _ToolbarState extends State<Toolbar> {
             widget.setTool(LaserPointer.currentLaserPointer);
           },
           padding: buttonPadding,
-          child: const Icon(Symbols.stylus_laser_pointer),
+          child: _toolIcon(
+            Symbols.stylus_laser_pointer,
+            selected: widget.currentTool == LaserPointer.currentLaserPointer,
+          ),
         ),
       ],
       ToolbarItem.eraser: [
@@ -616,7 +636,10 @@ class _ToolbarState extends State<Toolbar> {
           enabled: !widget.readOnly,
           onPressed: toggleEraser,
           padding: buttonPadding,
-          child: const FaIcon(FontAwesomeIcons.eraser, size: 16),
+          child: _toolIcon(
+            Symbols.ink_eraser,
+            selected: widget.currentTool is Eraser,
+          ),
         ),
       ],
       ToolbarItem.photo: [
@@ -625,10 +648,7 @@ class _ToolbarState extends State<Toolbar> {
           enabled: !widget.readOnly,
           onPressed: widget.pickPhoto,
           padding: buttonPadding,
-          child: const AdaptiveIcon(
-            icon: Icons.photo,
-            cupertinoIcon: CupertinoIcons.photo,
-          ),
+          child: _toolIcon(Symbols.image),
         ),
       ],
       ToolbarItem.text: [
@@ -638,10 +658,7 @@ class _ToolbarState extends State<Toolbar> {
           enabled: !widget.readOnly,
           onPressed: widget.toggleTextEditing,
           padding: buttonPadding,
-          child: const AdaptiveIcon(
-            icon: Icons.text_fields,
-            cupertinoIcon: CupertinoIcons.text_cursor,
-          ),
+          child: _toolIcon(Symbols.text_fields, selected: widget.textEditing),
         ),
       ],
       ToolbarItem.fingerDrawing: [
@@ -655,7 +672,7 @@ class _ToolbarState extends State<Toolbar> {
                 enabled: !widget.readOnly,
                 onPressed: widget.toggleFingerDrawing,
                 padding: buttonPadding,
-                child: const Icon(CupertinoIcons.hand_draw),
+                child: _toolIcon(Symbols.touch_app, selected: value),
               );
             },
           ),
@@ -786,9 +803,7 @@ class _ToolbarState extends State<Toolbar> {
               height: isToolbarVertical ? double.infinity : null,
               padding: const .symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: brightness == .dark
-                    ? const Color(0xFF252525)
-                    : const Color(0xFFF2F2F4),
+                color: colorScheme.surfaceContainer,
                 border: switch (alignment) {
                   AxisDirection.up => Border(bottom: dividerSide),
                   AxisDirection.down => Border(top: dividerSide),
@@ -799,6 +814,7 @@ class _ToolbarState extends State<Toolbar> {
               child: Wrap(
                 direction: isToolbarVertical ? Axis.vertical : Axis.horizontal,
                 alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 runSpacing: 8,
                 children: [
                   _buildDragHandle(isToolbarVertical, colorScheme),

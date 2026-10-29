@@ -33,6 +33,7 @@ class EditorBottomSheet extends StatefulWidget {
     required this.canRasterPdf,
     required this.getIsWatchingServer,
     required this.setIsWatchingServer,
+    required this.showExportOptions,
   });
 
   final bool invert;
@@ -51,6 +52,9 @@ class EditorBottomSheet extends StatefulWidget {
   final bool canRasterPdf;
   final bool Function() getIsWatchingServer;
   final void Function(bool) setIsWatchingServer;
+
+  /// Opens the export bar (SBA / PDF / PNG) in the toolbar.
+  final VoidCallback showExportOptions;
 
   @override
   State<EditorBottomSheet> createState() => _EditorBottomSheetState();
@@ -85,7 +89,22 @@ class _EditorBottomSheetState extends State<EditorBottomSheet> {
           child: ListView(
             shrinkWrap: true,
             children: [
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
+              // Transparent Material so the ripple paints above the panel color.
+              Material(
+                type: MaterialType.transparency,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.share),
+                  title: Text(t.editor.toolbar.export),
+                  enabled: !widget.coreInfo.readOnly,
+                  onTap: () {
+                    Navigator.pop(context);
+                    widget.showExportOptions();
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 children: [

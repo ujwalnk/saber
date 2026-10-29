@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart' as flutter_quill;
 import 'package:keybinder/keybinder.dart';
 import 'package:logging/logging.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdfrx/pdfrx.dart';
 import 'package:saber/components/canvas/_asset_cache.dart';
@@ -1378,7 +1379,6 @@ class EditorState extends State<Editor> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.of(context);
-    final platform = Theme.of(context).platform;
 
     final Widget canvas = CanvasGestureDetector(
       key: _canvasGestureDetectorKey,
@@ -1755,33 +1755,6 @@ class EditorState extends State<Editor> {
                           )
                         : null,
                   ),
-                  ValueListenableBuilder(
-                    valueListenable: showExportOptions,
-                    builder: (context, showExport, child) {
-                      return IconButton(
-                        style: IconButton.styleFrom(
-                          fixedSize: const Size(44, 44),
-                          padding: EdgeInsets.zero,
-                          shape: const CircleBorder(),
-                          backgroundColor: showExport
-                              ? colorScheme.secondaryContainer
-                              : null,
-                          foregroundColor: showExport
-                              ? colorScheme.onSecondaryContainer
-                              : null,
-                        ),
-                        icon: child!,
-                        tooltip: t.editor.toolbar.export,
-                        onPressed: !coreInfo.readOnly
-                            ? () => showExportOptions.value = !showExport
-                            : null,
-                      );
-                    },
-                    child: const AdaptiveIcon(
-                      icon: Icons.share,
-                      cupertinoIcon: CupertinoIcons.share,
-                    ),
-                  ),
                   IconButton(
                     style: IconButton.styleFrom(
                       fixedSize: const Size(44, 44),
@@ -1849,18 +1822,53 @@ class EditorState extends State<Editor> {
                   ),
                 ],
               ),
-        body: body,
-        floatingActionButton:
-            (DynamicMaterialApp.isFullscreen &&
-                !stows.editorToolbarShowInFullscreen.value)
-            ? FloatingActionButton(
-                shape: platform.isCupertino ? const CircleBorder() : null,
-                onPressed: () {
-                  DynamicMaterialApp.setFullscreen(false, updateSystem: true);
-                },
-                child: const Icon(Icons.fullscreen_exit),
-              )
-            : null,
+        body: Stack(
+          children: [
+            body,
+            if (DynamicMaterialApp.isFullscreen)
+              _buildExitFullscreenButton(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Floating button in the top right corner that leaves fullscreen.
+  Widget _buildExitFullscreenButton(BuildContext context) {
+    final colorScheme = ColorScheme.of(context);
+
+    // A right-hand toolbar that stays visible in fullscreen would sit under
+    // the button, so shift the button left of it.
+    final toolbarOnRight =
+        stows.editorToolbarAlignment.value == AxisDirection.right &&
+        stows.editorToolbarShowInFullscreen.value;
+    const verticalToolbarWidth = 80.0;
+
+    return Positioned(
+      top: 0,
+      right: toolbarOnRight ? verticalToolbarWidth : 0,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Material(
+            color: colorScheme.surfaceContainerHigh,
+            elevation: 4,
+            shadowColor: Colors.black,
+            shape: const CircleBorder(),
+            child: IconButton(
+              style: IconButton.styleFrom(
+                fixedSize: const Size(44, 44),
+                padding: EdgeInsets.zero,
+                foregroundColor: colorScheme.onSurface,
+              ),
+              icon: const Icon(Symbols.fullscreen_exit),
+              tooltip: t.editor.toolbar.fullscreen,
+              onPressed: () {
+                DynamicMaterialApp.setFullscreen(false, updateSystem: true);
+              },
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1931,6 +1939,7 @@ class EditorState extends State<Editor> {
         if (coreInfo.readOnly) return;
         autosaveAfterDelay();
       }),
+      showExportOptions: () => showExportOptions.value = true,
       pickPhotos: _pickPhotos,
       importPdf: importPdf,
       canRasterPdf: Editor.canRasterPdf,
