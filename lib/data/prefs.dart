@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
+import 'package:saber/components/canvas/_fountain_nib.dart';
 import 'package:saber/components/home/home_layout_button.dart';
 import 'package:saber/components/home/sort_button.dart';
 import 'package:saber/components/navbar/responsive_navbar.dart';
@@ -275,6 +276,14 @@ class Stows {
         fromJson: _strokeOptionsFromJson,
         volatile: !_isOnMainIsolate,
       );
+
+  /// Nib angle, smoothing and min/max width of the fountain pen.
+  final fountainNibSettings = PlainStow.json(
+    'fountainNibSettings',
+    const NibSettings(),
+    fromJson: NibSettings.fromJson,
+    volatile: !_isOnMainIsolate,
+  );
   final lastFountainPenColor = PlainStow(
         'lastFountainPenColor',
         Colors.black.toARGB32(),

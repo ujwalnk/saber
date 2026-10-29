@@ -91,6 +91,7 @@ class Pen extends Tool {
       pageIndex: pageIndex,
       page: page,
       toolId: toolId,
+      nib: stows.fountainNibSettings.value,
     );
     onDragUpdate(position, pressure);
   }
@@ -172,6 +173,7 @@ class Pen extends Tool {
           pageIndex: stroke.pageIndex,
           page: stroke.page,
           toolId: toolId,
+          nib: stroke.nib,
         )..addPoints(_boundingBoxTriangle(stroke));
       default:
         return null;

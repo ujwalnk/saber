@@ -35,6 +35,10 @@ class Stroke {
   bool pressureEnabled;
   final StrokeOptions options;
 
+  /// The nib this stroke was drawn with (only used by the fountain pen).
+  /// Stored per stroke so changing the pen settings never alters old ink.
+  final NibSettings nib;
+
   List<Offset>? _lowQualityPolygon, _highQualityPolygon;
   List<Offset> get lowQualityPolygon =>
       _lowQualityPolygon ??= getPolygon(quality: .low);
@@ -52,10 +56,11 @@ class Stroke {
   );
 
   /// True when this stroke is a single tap of the fountain pen, which pen_pal
-  /// draws as a plain circle (see [FountainNib.dotRadius]).
+  /// draws as a plain circle (see [fountainPenDotRadius]).
   bool get isFountainPenDot =>
       toolId == .fountainPen && runtimeType == Stroke && points.length == 1;
   Offset get fountainPenDotCenter => Offset(points.first.dx, points.first.dy);
+  double get fountainPenDotRadius => FountainNib.dotRadius(nib, options.size);
 
   void shift(Offset offset) {
     if (offset == .zero) return;
@@ -81,6 +86,7 @@ class Stroke {
     required this.pageIndex,
     required this.page,
     required this.toolId,
+    this.nib = const NibSettings(),
   });
 
   factory fromJson(
@@ -153,6 +159,7 @@ class Stroke {
       );
     }
 
+    final nibJson = json['nib'];
     return Stroke(
       color: color,
       pressureEnabled: pressureEnabled,
@@ -160,6 +167,9 @@ class Stroke {
       pageIndex: pageIndex,
       page: page,
       toolId: toolId,
+      nib: nibJson == null
+          ? const NibSettings()
+          : NibSettings.fromJson(nibJson),
     )..points.addAll(points);
   }
   Map<String, dynamic> toJson() {
@@ -174,6 +184,7 @@ class Stroke {
       'ty': toolId.id,
       'pe': pressureEnabled,
       'c': color.toARGB32(),
+      if (toolId == .fountainPen) 'nib': nib.toJson(),
     }..addAll(options.toJson());
   }
 
@@ -240,7 +251,12 @@ class Stroke {
     // The fountain pen is a 1:1 port of pen_pal: every point is kept and the
     // same outline is used at every zoom level.
     if (toolId == .fountainPen) {
-      return FountainNib.polygon(points, isComplete: options.isComplete);
+      return FountainNib.polygon(
+        points,
+        nib: nib,
+        size: options.size,
+        isComplete: options.isComplete,
+      );
     }
 
     final rememberSimulatedPressure =
@@ -446,6 +462,7 @@ class Stroke {
     pageIndex: pageIndex,
     page: page,
     toolId: toolId,
+    nib: nib,
   )..points.addAll(points);
 }
 

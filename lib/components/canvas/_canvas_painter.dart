@@ -6,7 +6,6 @@ import 'package:one_dollar_unistroke_recognizer/one_dollar_unistroke_recognizer.
 import 'package:path_drawing/path_drawing.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 import 'package:saber/components/canvas/_circle_stroke.dart';
-import 'package:saber/components/canvas/_fountain_nib.dart';
 import 'package:saber/components/canvas/_rectangle_stroke.dart';
 import 'package:saber/components/canvas/_stroke.dart';
 import 'package:saber/data/editor/page.dart';
@@ -151,7 +150,7 @@ class CanvasPainter extends CustomPainter {
         // pen_pal draws a lone tap as a plain circle.
         canvas.drawCircle(
           stroke.fountainPenDotCenter,
-          FountainNib.dotRadius,
+          stroke.fountainPenDotRadius,
           paint,
         );
       } else {
@@ -185,7 +184,7 @@ class CanvasPainter extends CustomPainter {
     if (currentStroke!.isFountainPenDot) {
       canvas.drawCircle(
         currentStroke!.fountainPenDotCenter,
-        FountainNib.dotRadius,
+        currentStroke!.fountainPenDotRadius,
         paint,
       );
       return;
