@@ -36,71 +36,68 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
   @override
   Widget build(BuildContext context) {
     final nib = _nib;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 620),
-      child: Wrap(
-        spacing: 16,
-        runSpacing: 0,
-        children: [
-          _row(
-            context,
-            label: 'Angle',
-            value: nib.angle,
-            min: 0,
-            max: 180,
-            step: 1,
-            text: '${nib.angle.round()}°',
-            onChanged: (v) => _set(nib.copyWith(angle: _round(v, 0))),
-          ),
-          _row(
-            context,
-            label: 'Smoothness',
-            value: nib.smoothing,
-            min: 0,
-            max: 0.95,
-            step: 0.05,
-            text: nib.smoothing.toStringAsFixed(2),
-            onChanged: (v) => _set(nib.copyWith(smoothing: _round(v, 2))),
-          ),
-          _row(
-            context,
-            label: 'Min width',
-            value: nib.minWidth,
-            min: 0.1,
-            max: 10,
-            step: 0.1,
-            text: nib.minWidth.toStringAsFixed(1),
-            onChanged: (v) {
-              final w = _round(v, 1);
-              _set(
-                nib.copyWith(
-                  minWidth: w,
-                  // keep min <= max
-                  maxWidth: w > nib.maxWidth ? w : nib.maxWidth,
-                ),
-              );
-            },
-          ),
-          _row(
-            context,
-            label: 'Max width',
-            value: nib.maxWidth,
-            min: 0.1,
-            max: 10,
-            step: 0.1,
-            text: nib.maxWidth.toStringAsFixed(1),
-            onChanged: (v) {
-              final w = _round(v, 1);
-              _set(
-                nib.copyWith(
-                  maxWidth: w,
-                  minWidth: w < nib.minWidth ? w : nib.minWidth,
-                ),
-              );
-            },
-          ),
-        ],
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _row(
+          context,
+          label: 'Angle',
+          value: nib.angle,
+          min: 0,
+          max: 180,
+          step: 1,
+          text: '${nib.angle.round()}°',
+          onChanged: (v) => _set(nib.copyWith(angle: _round(v, 0))),
+        ),
+        _row(
+          context,
+          label: 'Smoothness',
+          value: nib.smoothing,
+          min: 0,
+          max: 0.95,
+          step: 0.05,
+          text: nib.smoothing.toStringAsFixed(2),
+          onChanged: (v) => _set(nib.copyWith(smoothing: _round(v, 2))),
+        ),
+        _row(
+          context,
+          label: 'Min width',
+          value: nib.minWidth,
+          min: 0.1,
+          max: 10,
+          step: 0.1,
+          text: nib.minWidth.toStringAsFixed(1),
+          onChanged: (v) {
+            final w = _round(v, 1);
+            _set(
+              nib.copyWith(
+                minWidth: w,
+                // keep min <= max
+                maxWidth: w > nib.maxWidth ? w : nib.maxWidth,
+              ),
+            );
+          },
+        ),
+        _row(
+          context,
+          label: 'Max width',
+          value: nib.maxWidth,
+          min: 0.1,
+          max: 10,
+          step: 0.1,
+          text: nib.maxWidth.toStringAsFixed(1),
+          onChanged: (v) {
+            final w = _round(v, 1);
+            _set(
+              nib.copyWith(
+                maxWidth: w,
+                minWidth: w < nib.minWidth ? w : nib.minWidth,
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -116,11 +113,11 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
   }) {
     final colorScheme = ColorScheme.of(context);
     return SizedBox(
-      width: 300,
+      height: 36,
       child: Row(
         children: [
           SizedBox(
-            width: 72,
+            width: 76,
             child: Text(
               label,
               style: TextStyle(

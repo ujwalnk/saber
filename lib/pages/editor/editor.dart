@@ -648,12 +648,19 @@ class EditorState extends State<Editor> {
         if (newStroke == null) return;
         if (newStroke.isEmpty) return;
 
-        if (stows.autoStraightenLines.value &&
-            currentTool is! ShapePen &&
-            (!stows.autoStraightenHighlighterOnly.value ||
-                newStroke.toolId == .highlighter) &&
-            newStroke.isStraightLine()) {
-          newStroke.convertToLine();
+        if (currentTool is! ShapePen) {
+          if (stows.autoStraightenHighlighterOnly.value) {
+            // Highlighter strokes are always straightened, whatever their
+            // length or shape. Pens and pencil are left exactly as drawn.
+            if (newStroke.toolId == .highlighter &&
+                newStroke.points.length >= 2 &&
+                newStroke.points.first != newStroke.points.last) {
+              newStroke.convertToLine();
+            }
+          } else if (stows.autoStraightenLines.value &&
+              newStroke.isStraightLine()) {
+            newStroke.convertToLine();
+          }
         }
 
         createPage(newStroke.pageIndex);
@@ -1420,6 +1427,9 @@ class EditorState extends State<Editor> {
             !stows.editorToolbarShowInFullscreen.value,
         maintainState: true,
         child: SafeArea(
+          // The toolbar runs edge to edge, so don't inset it at the sides.
+          left: isToolbarVertical && alignment == AxisDirection.left,
+          right: isToolbarVertical && alignment == AxisDirection.right,
           bottom: alignment != AxisDirection.up,
           child: Toolbar(
             readOnly: coreInfo.readOnly,

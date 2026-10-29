@@ -173,13 +173,30 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
-  /// When true, [autoStraightenLines] only applies to the highlighter;
-  /// pen, pencil and the pens' automatic line snapping are left as drawn.
+  /// When true, every highlighter stroke is straightened (any length) and
+  /// nothing else is: pen, pencil and the pens' automatic line snapping are
+  /// left as drawn. Takes the place of [autoStraightenLines].
   final autoStraightenHighlighterOnly = PlainStow(
     'autoStraightenHighlighterOnly',
     false,
     volatile: !_isOnMainIsolate,
   );
+
+  /// In fullscreen, also hide the system navigation bar (Android).
+  /// When false, only the status bar and the app's own top bar are hidden.
+  final hideNavBarInFullscreen = PlainStow(
+    'hideNavBarInFullscreen',
+    true,
+    volatile: !_isOnMainIsolate,
+  );
+
+  /// ARGB32 strings of the three colors shown directly in the editor toolbar.
+  /// Long-press one in the toolbar to replace it with the current color.
+  final toolbarQuickColors = PlainStow('toolbarQuickColors', <String>[
+    Colors.black.toARGB32().toString(),
+    Colors.yellow.toARGB32().toString(),
+    Colors.red.toARGB32().toString(),
+  ], volatile: !_isOnMainIsolate);
 
   final printPageIndicators = PlainStow(
     'printPageIndicators',

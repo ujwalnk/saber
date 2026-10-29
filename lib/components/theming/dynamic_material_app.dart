@@ -40,9 +40,18 @@ class DynamicMaterialApp extends StatefulHookWidget {
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       windowManager.setFullScreen(value);
     } else {
-      SystemChrome.setEnabledSystemUIMode(
-        value ? SystemUiMode.immersive : SystemUiMode.edgeToEdge,
-      );
+      if (!value) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      } else if (stows.hideNavBarInFullscreen.value) {
+        // Hides the status bar and the navigation bar.
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
+      } else {
+        // Hides the status bar only; the navigation bar stays visible.
+        SystemChrome.setEnabledSystemUIMode(
+          SystemUiMode.manual,
+          overlays: [SystemUiOverlay.bottom],
+        );
+      }
     }
   }
 
@@ -76,6 +85,13 @@ class DynamicMaterialAppState extends State<DynamicMaterialApp>
   }
 
   Future<void> _onFullscreenChange(bool systemOverlaysAreVisible) async {
+    // With the navigation bar kept visible, "overlays are visible" is the
+    // normal state in fullscreen and doesn't mean the user left it.
+    if (systemOverlaysAreVisible &&
+        DynamicMaterialApp.isFullscreen &&
+        !stows.hideNavBarInFullscreen.value) {
+      return;
+    }
     DynamicMaterialApp.setFullscreen(
       !systemOverlaysAreVisible,
       updateSystem: false,

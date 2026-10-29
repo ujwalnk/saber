@@ -727,6 +727,9 @@ class Translations$settings$prefLabels$en {
 	/// en: 'Only straighten highlighter lines'
 	String get autoStraightenHighlighterOnly => 'Only straighten highlighter lines';
 
+	/// en: 'Hide navigation bar in fullscreen'
+	String get hideNavBarInFullscreen => 'Hide navigation bar in fullscreen';
+
 	/// en: 'Custom Saber folder'
 	String get customDataDir => 'Custom Saber folder';
 
@@ -780,8 +783,11 @@ class Translations$settings$prefDescriptions$en {
 	/// en: 'Straightens long lines without having to use the shape pen'
 	String get autoStraightenLines => 'Straightens long lines without having to use the shape pen';
 
-	/// en: 'Pen and pencil lines stay exactly as you draw them. Needs "Auto straighten lines" to be on'
-	String get autoStraightenHighlighterOnly => 'Pen and pencil lines stay exactly as you draw them. Needs "Auto straighten lines" to be on';
+	/// en: 'Every highlighter stroke becomes a straight line, whatever its length. Pen and pencil lines stay exactly as you draw them'
+	String get autoStraightenHighlighterOnly => 'Every highlighter stroke becomes a straight line, whatever its length. Pen and pencil lines stay exactly as you draw them';
+
+	/// en: 'Fullscreen always hides the status bar and the top bar. Turn this off to keep the navigation bar visible'
+	String get hideNavBarInFullscreen => 'Fullscreen always hides the status bar and the top bar. Turn this off to keep the navigation bar visible';
 
 	/// en: 'Tell me about updates as soon as they're available'
 	String get shouldAlwaysAlertForUpdates => 'Tell me about updates as soon as they\'re available';

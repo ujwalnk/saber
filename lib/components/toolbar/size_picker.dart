@@ -44,9 +44,10 @@ class _SizePickerState extends State<SizePicker> {
       onChanged: (size) => setState(() => pen.options.size = size),
     );
 
+    final horizontal = widget.axis == Axis.horizontal;
     return Flex(
       direction: widget.axis,
-      mainAxisSize: .min,
+      mainAxisSize: horizontal ? MainAxisSize.max : MainAxisSize.min,
       children: [
         Column(
           children: [
@@ -62,12 +63,10 @@ class _SizePickerState extends State<SizePicker> {
           ],
         ),
         const SizedBox(width: 8),
-        Padding(
-          padding: const .symmetric(vertical: 8),
-          child: widget.axis == Axis.horizontal
-              ? SizedBox(width: SizePicker.largeLength + 64, child: slider)
-              : slider,
-        ),
+        if (horizontal)
+          Expanded(child: slider)
+        else
+          Padding(padding: const .symmetric(vertical: 8), child: slider),
       ],
     );
   }

@@ -126,6 +126,7 @@ settings:
     shapeRecognitionDelay: Shape recognition delay
     autoStraightenLines: Auto straighten lines
     autoStraightenHighlighterOnly: Only straighten highlighter lines
+    hideNavBarInFullscreen: Hide navigation bar in fullscreen
     customDataDir: Custom Saber folder
     sentry: Error reporting
   prefDescriptions:
@@ -145,7 +146,8 @@ settings:
     autosave: Auto-save after a short delay, or never
     shapeRecognitionDelay: How often to update the shape preview
     autoStraightenLines: Straightens long lines without having to use the shape pen
-    autoStraightenHighlighterOnly: Pen and pencil lines stay exactly as you draw them. Needs "Auto straighten lines" to be on
+    autoStraightenHighlighterOnly: Every highlighter stroke becomes a straight line, whatever its length. Pen and pencil lines stay exactly as you draw them
+    hideNavBarInFullscreen: Fullscreen always hides the status bar and the top bar. Turn this off to keep the navigation bar visible
     shouldAlwaysAlertForUpdates: Tell me about updates as soon as they're available
     sentry:
       active: Active
