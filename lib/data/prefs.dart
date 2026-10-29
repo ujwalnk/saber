@@ -173,6 +173,14 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// When true, [autoStraightenLines] only applies to the highlighter;
+  /// pen, pencil and the pens' automatic line snapping are left as drawn.
+  final autoStraightenHighlighterOnly = PlainStow(
+    'autoStraightenHighlighterOnly',
+    false,
+    volatile: !_isOnMainIsolate,
+  );
+
   final printPageIndicators = PlainStow(
     'printPageIndicators',
     false,

@@ -141,6 +141,8 @@ class Pen extends Tool {
 
     switch (detected.name) {
       case DefaultUnistrokeNames.line:
+        // "Only straighten highlighter lines": keep pen lines as drawn.
+        if (stows.autoStraightenHighlighterOnly.value) return null;
         return stroke..convertToLine();
       case DefaultUnistrokeNames.rectangle:
         return RectangleStroke(

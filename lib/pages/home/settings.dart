@@ -497,6 +497,13 @@ class _SettingsPageState extends State<SettingsPage> {
                   icon: Icons.straighten,
                   pref: stows.autoStraightenLines,
                 ),
+                SettingsSwitch(
+                  title: t.settings.prefLabels.autoStraightenHighlighterOnly,
+                  subtitle:
+                      t.settings.prefDescriptions.autoStraightenHighlighterOnly,
+                  icon: FontAwesomeIcons.highlighter,
+                  pref: stows.autoStraightenHighlighterOnly,
+                ),
                 SettingsSubtitle(subtitle: t.settings.prefCategories.advanced),
                 if (isSentryAvailable) const SettingsSentryConsent(),
                 if (Platform.isAndroid)

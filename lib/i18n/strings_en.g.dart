@@ -724,6 +724,9 @@ class Translations$settings$prefLabels$en {
 	/// en: 'Auto straighten lines'
 	String get autoStraightenLines => 'Auto straighten lines';
 
+	/// en: 'Only straighten highlighter lines'
+	String get autoStraightenHighlighterOnly => 'Only straighten highlighter lines';
+
 	/// en: 'Custom Saber folder'
 	String get customDataDir => 'Custom Saber folder';
 
@@ -776,6 +779,9 @@ class Translations$settings$prefDescriptions$en {
 
 	/// en: 'Straightens long lines without having to use the shape pen'
 	String get autoStraightenLines => 'Straightens long lines without having to use the shape pen';
+
+	/// en: 'Pen and pencil lines stay exactly as you draw them. Needs "Auto straighten lines" to be on'
+	String get autoStraightenHighlighterOnly => 'Pen and pencil lines stay exactly as you draw them. Needs "Auto straighten lines" to be on';
 
 	/// en: 'Tell me about updates as soon as they're available'
 	String get shouldAlwaysAlertForUpdates => 'Tell me about updates as soon as they\'re available';

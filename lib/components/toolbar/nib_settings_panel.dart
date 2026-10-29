@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:saber/components/canvas/_fountain_nib.dart';
+import 'package:saber/components/toolbar/step_slider.dart';
 import 'package:saber/data/prefs.dart';
 
 /// Sliders for the fountain pen's nib: angle, smoothness, min & max width.
@@ -36,7 +37,7 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
   Widget build(BuildContext context) {
     final nib = _nib;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 420),
+      constraints: const BoxConstraints(maxWidth: 620),
       child: Wrap(
         spacing: 16,
         runSpacing: 0,
@@ -47,7 +48,7 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
             value: nib.angle,
             min: 0,
             max: 180,
-            divisions: 180,
+            step: 1,
             text: '${nib.angle.round()}°',
             onChanged: (v) => _set(nib.copyWith(angle: _round(v, 0))),
           ),
@@ -57,7 +58,7 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
             value: nib.smoothing,
             min: 0,
             max: 0.95,
-            divisions: 19,
+            step: 0.05,
             text: nib.smoothing.toStringAsFixed(2),
             onChanged: (v) => _set(nib.copyWith(smoothing: _round(v, 2))),
           ),
@@ -67,7 +68,7 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
             value: nib.minWidth,
             min: 0.1,
             max: 10,
-            divisions: 99,
+            step: 0.1,
             text: nib.minWidth.toStringAsFixed(1),
             onChanged: (v) {
               final w = _round(v, 1);
@@ -86,7 +87,7 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
             value: nib.maxWidth,
             min: 0.1,
             max: 10,
-            divisions: 99,
+            step: 0.1,
             text: nib.maxWidth.toStringAsFixed(1),
             onChanged: (v) {
               final w = _round(v, 1);
@@ -109,13 +110,13 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
     required double value,
     required double min,
     required double max,
-    required int divisions,
+    required double step,
     required String text,
     required ValueChanged<double> onChanged,
   }) {
     final colorScheme = ColorScheme.of(context);
     return SizedBox(
-      width: 200,
+      width: 300,
       child: Row(
         children: [
           SizedBox(
@@ -129,23 +130,13 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
             ),
           ),
           Expanded(
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                activeTrackColor: _orange,
-                thumbColor: _orange,
-                inactiveTrackColor: colorScheme.onSurface.withValues(
-                  alpha: 0.2,
-                ),
-                trackHeight: 3,
-                overlayShape: SliderComponentShape.noOverlay,
-              ),
-              child: Slider(
-                value: value.clamp(min, max),
-                min: min,
-                max: max,
-                divisions: divisions,
-                onChanged: onChanged,
-              ),
+            child: StepSlider(
+              value: value,
+              min: min,
+              max: max,
+              step: step,
+              activeColor: _orange,
+              onChanged: onChanged,
             ),
           ),
           SizedBox(

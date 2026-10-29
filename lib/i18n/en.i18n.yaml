@@ -125,6 +125,7 @@ settings:
     autosave: Auto-save
     shapeRecognitionDelay: Shape recognition delay
     autoStraightenLines: Auto straighten lines
+    autoStraightenHighlighterOnly: Only straighten highlighter lines
     customDataDir: Custom Saber folder
     sentry: Error reporting
   prefDescriptions:
@@ -144,6 +145,7 @@ settings:
     autosave: Auto-save after a short delay, or never
     shapeRecognitionDelay: How often to update the shape preview
     autoStraightenLines: Straightens long lines without having to use the shape pen
+    autoStraightenHighlighterOnly: Pen and pencil lines stay exactly as you draw them. Needs "Auto straighten lines" to be on
     shouldAlwaysAlertForUpdates: Tell me about updates as soon as they're available
     sentry:
       active: Active

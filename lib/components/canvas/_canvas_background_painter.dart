@@ -114,7 +114,8 @@ class CanvasBackgroundPainter extends CustomPainter {
           );
         }
       case .grid:
-        for (double y = lineHeight * 2; y < size.height; y += lineHeight) {
+        // Grids cover the whole page, including the top margin.
+        for (double y = 0; y < size.height; y += lineHeight) {
           yield PatternElement(
             Offset(0, y),
             Offset(size.width, y),
@@ -123,7 +124,7 @@ class CanvasBackgroundPainter extends CustomPainter {
         }
         for (double x = 0; x < size.width; x += lineHeight) {
           yield PatternElement(
-            Offset(x, lineHeight * 2),
+            Offset(x, 0),
             Offset(x, size.height),
             isLine: true,
           );
@@ -196,189 +197,192 @@ class CanvasBackgroundPainter extends CustomPainter {
             isLine: true,
           );
         }
-      case .wideRuled: {
-        final spacing = lineHeight * 1.5;
-        for (double y = spacing * 2; y < size.height; y += spacing) {
-          yield PatternElement(
-            Offset(0, y),
-            Offset(size.width, y),
-            isLine: true,
-          );
-        }
-      }
-      case .narrowRuled: {
-        final spacing = lineHeight * 2 / 3;
-        for (double y = spacing * 2; y < size.height; y += spacing) {
-          yield PatternElement(
-            Offset(0, y),
-            Offset(size.width, y),
-            isLine: true,
-          );
-        }
-      }
-      case .largeGrid: {
-        final spacing = lineHeight * 1.5;
-        for (double y = spacing * 2; y < size.height; y += spacing) {
-          yield PatternElement(
-            Offset(0, y),
-            Offset(size.width, y),
-            isLine: true,
-          );
-        }
-        for (double x = 0; x < size.width; x += spacing) {
-          yield PatternElement(
-            Offset(x, spacing * 2),
-            Offset(x, size.height),
-            isLine: true,
-          );
-        }
-      }
-      case .smallGrid: {
-        final spacing = lineHeight / 2;
-        for (double y = spacing * 2; y < size.height; y += spacing) {
-          yield PatternElement(
-            Offset(0, y),
-            Offset(size.width, y),
-            isLine: true,
-          );
-        }
-        for (double x = 0; x < size.width; x += spacing) {
-          yield PatternElement(
-            Offset(x, spacing * 2),
-            Offset(x, size.height),
-            isLine: true,
-          );
-        }
-      }
-      case .largeDots: {
-        final spacing = lineHeight * 1.5;
-        for (double y = spacing * 2; y <= size.height; y += spacing) {
-          for (double x = 0; x <= size.width; x += spacing) {
-            yield PatternElement(Offset(x, y), Offset(x, y), isLine: false);
-          }
-        }
-      }
-      case .smallDots: {
-        final spacing = lineHeight / 2;
-        for (double y = spacing * 2; y <= size.height; y += spacing) {
-          for (double x = 0; x <= size.width; x += spacing) {
-            yield PatternElement(Offset(x, y), Offset(x, y), isLine: false);
-          }
-        }
-      }
-      case .isometricDots: {
-        final spacing = lineHeight.toDouble();
-        var row = 0;
-        for (double y = spacing * 2; y <= size.height; y += spacing, row++) {
-          final xOffset = row.isOdd ? spacing / 2 : 0.0;
-          for (double x = xOffset; x <= size.width; x += spacing) {
-            yield PatternElement(Offset(x, y), Offset(x, y), isLine: false);
-          }
-        }
-      }
-      case .seyesRuled: {
-        // main grid squares
-        for (double y = lineHeight * 2; y < size.height; y += lineHeight) {
-          yield PatternElement(
-            Offset(0, y),
-            Offset(size.width, y),
-            isLine: true,
-          );
-        }
-        for (double x = 0; x < size.width; x += lineHeight) {
-          yield PatternElement(
-            Offset(x, lineHeight * 2),
-            Offset(x, size.height),
-            isLine: true,
-          );
-        }
-        // interlines through each square (secondary color, like real Seyes paper)
-        final half = lineHeight / 2;
-        for (
-          double y = lineHeight * 2 + half;
-          y < size.height;
-          y += lineHeight
-        ) {
-          yield PatternElement(
-            Offset(0, y),
-            Offset(size.width, y),
-            isLine: true,
-            secondaryColor: true,
-          );
-        }
-      }
-      case .crossGrid: {
-        final spacing = lineHeight.toDouble();
-        final arm = spacing * 0.22;
-        for (double y = spacing * 2; y <= size.height; y += spacing) {
-          for (double x = 0; x <= size.width; x += spacing) {
+      case .wideRuled:
+        {
+          final spacing = lineHeight * 1.5;
+          for (double y = spacing * 2; y < size.height; y += spacing) {
             yield PatternElement(
-              Offset(x - arm, y),
-              Offset(x + arm, y),
-              isLine: true,
-            );
-            yield PatternElement(
-              Offset(x, y - arm),
-              Offset(x, y + arm),
+              Offset(0, y),
+              Offset(size.width, y),
               isLine: true,
             );
           }
         }
-      }
-      case .dashedLines: {
-        const dashLength = 12.0;
-        const gapLength = 8.0;
-        for (double y = lineHeight * 2; y < size.height; y += lineHeight) {
-          for (
-            double x = 0;
-            x < size.width;
-            x += dashLength + gapLength
-          ) {
+      case .narrowRuled:
+        {
+          final spacing = lineHeight * 2 / 3;
+          for (double y = spacing * 2; y < size.height; y += spacing) {
             yield PatternElement(
-              Offset(x, y),
-              Offset((x + dashLength).clamp(0.0, size.width), y),
+              Offset(0, y),
+              Offset(size.width, y),
               isLine: true,
             );
           }
         }
-      }
-      case .checklist: {
-        final boxSize = lineHeight * 0.55;
-        final boxLeft = lineHeight * 0.75;
-        final textLeft = boxLeft + boxSize + lineHeight * 0.5;
-        for (double y = lineHeight * 2; y < size.height; y += lineHeight) {
-          // writing line, starting after the checkbox
-          yield PatternElement(
-            Offset(textLeft, y),
-            Offset(size.width, y),
-            isLine: true,
-          );
-          // checkbox square outline, vertically centered on the line
-          final top = y - boxSize / 2;
-          final right = boxLeft + boxSize;
-          final bottom = y + boxSize / 2;
-          yield PatternElement(
-            Offset(boxLeft, top),
-            Offset(right, top),
-            isLine: true,
-          );
-          yield PatternElement(
-            Offset(right, top),
-            Offset(right, bottom),
-            isLine: true,
-          );
-          yield PatternElement(
-            Offset(right, bottom),
-            Offset(boxLeft, bottom),
-            isLine: true,
-          );
-          yield PatternElement(
-            Offset(boxLeft, bottom),
-            Offset(boxLeft, top),
-            isLine: true,
-          );
+      case .largeGrid:
+        {
+          final spacing = lineHeight * 1.5;
+          for (double y = 0; y < size.height; y += spacing) {
+            yield PatternElement(
+              Offset(0, y),
+              Offset(size.width, y),
+              isLine: true,
+            );
+          }
+          for (double x = 0; x < size.width; x += spacing) {
+            yield PatternElement(
+              Offset(x, 0),
+              Offset(x, size.height),
+              isLine: true,
+            );
+          }
         }
-      }
+      case .smallGrid:
+        {
+          final spacing = lineHeight / 2;
+          for (double y = 0; y < size.height; y += spacing) {
+            yield PatternElement(
+              Offset(0, y),
+              Offset(size.width, y),
+              isLine: true,
+            );
+          }
+          for (double x = 0; x < size.width; x += spacing) {
+            yield PatternElement(
+              Offset(x, 0),
+              Offset(x, size.height),
+              isLine: true,
+            );
+          }
+        }
+      case .largeDots:
+        {
+          final spacing = lineHeight * 1.5;
+          for (double y = spacing * 2; y <= size.height; y += spacing) {
+            for (double x = 0; x <= size.width; x += spacing) {
+              yield PatternElement(Offset(x, y), Offset(x, y), isLine: false);
+            }
+          }
+        }
+      case .smallDots:
+        {
+          final spacing = lineHeight / 2;
+          for (double y = spacing * 2; y <= size.height; y += spacing) {
+            for (double x = 0; x <= size.width; x += spacing) {
+              yield PatternElement(Offset(x, y), Offset(x, y), isLine: false);
+            }
+          }
+        }
+      case .isometricDots:
+        {
+          final spacing = lineHeight.toDouble();
+          var row = 0;
+          for (double y = spacing * 2; y <= size.height; y += spacing, row++) {
+            final xOffset = row.isOdd ? spacing / 2 : 0.0;
+            for (double x = xOffset; x <= size.width; x += spacing) {
+              yield PatternElement(Offset(x, y), Offset(x, y), isLine: false);
+            }
+          }
+        }
+      case .seyesRuled:
+        {
+          // main grid squares
+          for (double y = 0; y < size.height; y += lineHeight) {
+            yield PatternElement(
+              Offset(0, y),
+              Offset(size.width, y),
+              isLine: true,
+            );
+          }
+          for (double x = 0; x < size.width; x += lineHeight) {
+            yield PatternElement(
+              Offset(x, 0),
+              Offset(x, size.height),
+              isLine: true,
+            );
+          }
+          // interlines through each square (secondary color, like real Seyes paper)
+          final half = lineHeight / 2;
+          for (double y = half; y < size.height; y += lineHeight) {
+            yield PatternElement(
+              Offset(0, y),
+              Offset(size.width, y),
+              isLine: true,
+              secondaryColor: true,
+            );
+          }
+        }
+      case .crossGrid:
+        {
+          final spacing = lineHeight.toDouble();
+          final arm = spacing * 0.22;
+          for (double y = 0; y <= size.height; y += spacing) {
+            for (double x = 0; x <= size.width; x += spacing) {
+              yield PatternElement(
+                Offset(x - arm, y),
+                Offset(x + arm, y),
+                isLine: true,
+              );
+              yield PatternElement(
+                Offset(x, y - arm),
+                Offset(x, y + arm),
+                isLine: true,
+              );
+            }
+          }
+        }
+      case .dashedLines:
+        {
+          const dashLength = 12.0;
+          const gapLength = 8.0;
+          for (double y = lineHeight * 2; y < size.height; y += lineHeight) {
+            for (double x = 0; x < size.width; x += dashLength + gapLength) {
+              yield PatternElement(
+                Offset(x, y),
+                Offset((x + dashLength).clamp(0.0, size.width), y),
+                isLine: true,
+              );
+            }
+          }
+        }
+      case .checklist:
+        {
+          final boxSize = lineHeight * 0.55;
+          final boxLeft = lineHeight * 0.75;
+          final textLeft = boxLeft + boxSize + lineHeight * 0.5;
+          for (double y = lineHeight * 2; y < size.height; y += lineHeight) {
+            // writing line, starting after the checkbox
+            yield PatternElement(
+              Offset(textLeft, y),
+              Offset(size.width, y),
+              isLine: true,
+            );
+            // checkbox square outline, vertically centered on the line
+            final top = y - boxSize / 2;
+            final right = boxLeft + boxSize;
+            final bottom = y + boxSize / 2;
+            yield PatternElement(
+              Offset(boxLeft, top),
+              Offset(right, top),
+              isLine: true,
+            );
+            yield PatternElement(
+              Offset(right, top),
+              Offset(right, bottom),
+              isLine: true,
+            );
+            yield PatternElement(
+              Offset(right, bottom),
+              Offset(boxLeft, bottom),
+              isLine: true,
+            );
+            yield PatternElement(
+              Offset(boxLeft, bottom),
+              Offset(boxLeft, top),
+              isLine: true,
+            );
+          }
+        }
     }
   }
 }
