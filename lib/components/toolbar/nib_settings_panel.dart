@@ -18,8 +18,6 @@ class NibSettingsPanel extends StatefulWidget {
 }
 
 class _NibSettingsPanelState extends State<NibSettingsPanel> {
-  static const _orange = Color(0xFFFF6B35);
-
   NibSettings get _nib => stows.fountainNibSettings.value;
 
   void _set(NibSettings nib) {
@@ -132,7 +130,6 @@ class _NibSettingsPanelState extends State<NibSettingsPanel> {
               min: min,
               max: max,
               step: step,
-              activeColor: _orange,
               onChanged: onChanged,
             ),
           ),

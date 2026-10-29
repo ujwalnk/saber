@@ -16,11 +16,9 @@ class SamsungPanel extends StatelessWidget {
   /// Corner radius, defaults to 20 (selection bar uses 14).
   final double borderRadius;
 
-  /// Panel background color, theme-aware.
+  /// Panel background color: a tinted surface from the app's color scheme.
   static Color panelColorOf(BuildContext context) {
-    return Theme.brightnessOf(context) == .dark
-        ? const Color(0xFF2D2D2F)
-        : Theme.of(context).colorScheme.surfaceContainerHighest;
+    return ColorScheme.of(context).surfaceContainerHigh;
   }
 
   @override

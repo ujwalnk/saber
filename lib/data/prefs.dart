@@ -190,6 +190,28 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// When true, the eraser removes whole strokes (the old behaviour).
+  /// When false, it only removes the parts of a stroke it touches.
+  final eraseWholeStrokes = PlainStow(
+    'eraseWholeStrokes',
+    false,
+    volatile: !_isOnMainIsolate,
+  );
+
+  /// Names of every `ToolbarItem`, in the order they appear in the toolbar.
+  final toolbarItemOrder = PlainStow(
+    'toolbarItemOrder',
+    <String>[],
+    volatile: !_isOnMainIsolate,
+  );
+
+  /// Names of the `ToolbarItem`s the user removed from the toolbar.
+  final toolbarItemsHidden = PlainStow(
+    'toolbarItemsHidden',
+    <String>[],
+    volatile: !_isOnMainIsolate,
+  );
+
   /// ARGB32 strings of the three colors shown directly in the editor toolbar.
   /// Long-press one in the toolbar to replace it with the current color.
   final toolbarQuickColors = PlainStow('toolbarQuickColors', <String>[

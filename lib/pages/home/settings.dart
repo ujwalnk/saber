@@ -17,6 +17,7 @@ import 'package:saber/components/settings/settings_selection.dart';
 import 'package:saber/components/settings/settings_sentry.dart';
 import 'package:saber/components/settings/settings_subtitle.dart';
 import 'package:saber/components/settings/settings_switch.dart';
+import 'package:saber/components/toolbar/toolbar_customize_dialog.dart';
 import 'package:saber/components/settings/update_manager.dart';
 import 'package:saber/components/theming/adaptive_alert_dialog.dart';
 import 'package:saber/components/theming/adaptive_toggle_buttons.dart';
@@ -342,6 +343,12 @@ class _SettingsPageState extends State<SettingsPage> {
                   pref: stows.autoClearWhiteboardOnExit,
                 ),
                 SettingsSwitch(
+                  title: 'Erase whole strokes',
+                  subtitle: 'Off: the eraser only removes the part of a stroke it touches',
+                  icon: FontAwesomeIcons.eraser,
+                  pref: stows.eraseWholeStrokes,
+                ),
+                SettingsSwitch(
                   title: t.settings.prefLabels.disableEraserAfterUse,
                   subtitle: t.settings.prefDescriptions.disableEraserAfterUse,
                   icon: FontAwesomeIcons.eraser,
@@ -401,6 +408,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
 
                 SettingsSubtitle(subtitle: t.settings.prefCategories.editor),
+                SettingsButton(
+                  title: 'Customize toolbar',
+                  subtitle: 'Rearrange the editor toolbar or remove tools',
+                  icon: Icons.tune,
+                  onPressed: () => ToolbarCustomizeDialog.show(context),
+                ),
                 SettingsSwitch(
                   title: t.settings.prefLabels.editorToolbarShowInFullscreen,
                   icon: cupertino

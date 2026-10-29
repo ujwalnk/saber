@@ -367,6 +367,9 @@ class EditorState extends State<Editor> {
           removeExcessPages();
 
         case .erase:
+          for (final stroke in item.replacementStrokes) {
+            coreInfo.pages[stroke.pageIndex].strokes.remove(stroke);
+          }
           for (final stroke in item.strokes) {
             createPage(stroke.pageIndex);
             coreInfo.pages[stroke.pageIndex].insertStroke(stroke);
@@ -452,7 +455,18 @@ class EditorState extends State<Editor> {
       case .draw:
         undo(item.copyWith(type: .erase));
       case .erase:
-        undo(item.copyWith(type: .draw));
+        if (item.replacementStrokes.isEmpty) {
+          undo(item.copyWith(type: .draw));
+        } else {
+          // Redo a partial erase: bring the pieces back and remove the
+          // originals, which is the undo of the swapped item.
+          undo(
+            item.copyWith(
+              strokes: item.replacementStrokes,
+              replacementStrokes: item.strokes,
+            ),
+          );
+        }
       case .deletePage:
         undo(item.copyWith(type: .insertPage));
       case .insertPage:
@@ -568,12 +582,7 @@ class EditorState extends State<Editor> {
         currentPressure,
       );
     } else if (currentTool is Eraser) {
-      for (final stroke in (currentTool as Eraser).checkForOverlappingStrokes(
-        position,
-        page.strokes,
-      )) {
-        page.strokes.remove(stroke);
-      }
+      (currentTool as Eraser).erase(position, position, page);
       removeExcessPages();
     } else if (currentTool is Select) {
       final select = currentTool as Select;
@@ -609,12 +618,7 @@ class EditorState extends State<Editor> {
       (currentTool as Pen).onDragUpdate(position, currentPressure);
       page.redrawStrokes();
     } else if (currentTool is Eraser) {
-      for (final stroke in (currentTool as Eraser).checkForOverlappingStrokes(
-        position,
-        page.strokes,
-      )) {
-        page.strokes.remove(stroke);
-      }
+      (currentTool as Eraser).erase(previousPosition, position, page);
       page.redrawStrokes();
       removeExcessPages();
     } else if (currentTool is Select) {
@@ -674,18 +678,19 @@ class EditorState extends State<Editor> {
           ),
         );
       } else if (currentTool is Eraser) {
-        final erased = (currentTool as Eraser).onDragEnd();
+        final result = (currentTool as Eraser).onDragEnd();
         if (stylusButtonWasPressed || stows.disableEraserAfterUse.value) {
           // restore previous tool
           stylusButtonWasPressed = false;
           currentTool = _lastNonEraserTool;
         }
-        if (erased.isEmpty) return;
+        if (result.erased.isEmpty) return;
         history.recordChange(
           EditorHistoryItem(
             type: .erase,
             pageIndex: dragPageIndex!,
-            strokes: erased,
+            strokes: result.erased,
+            replacementStrokes: result.added,
             images: [],
           ),
         );
@@ -1701,6 +1706,36 @@ class EditorState extends State<Editor> {
                   triggerSave: saveToFile,
                 ),
                 actions: [
+                  IconButton(
+                    style: IconButton.styleFrom(
+                      fixedSize: const Size(44, 44),
+                      padding: EdgeInsets.zero,
+                      shape: const CircleBorder(),
+                    ),
+                    icon: const AdaptiveIcon(
+                      icon: Icons.undo,
+                      cupertinoIcon: CupertinoIcons.arrow_uturn_left,
+                    ),
+                    tooltip: t.editor.toolbar.undo,
+                    onPressed: (!coreInfo.readOnly && history.canUndo)
+                        ? undo
+                        : null,
+                  ),
+                  IconButton(
+                    style: IconButton.styleFrom(
+                      fixedSize: const Size(44, 44),
+                      padding: EdgeInsets.zero,
+                      shape: const CircleBorder(),
+                    ),
+                    icon: const AdaptiveIcon(
+                      icon: Icons.redo,
+                      cupertinoIcon: CupertinoIcons.arrow_uturn_right,
+                    ),
+                    tooltip: t.editor.toolbar.redo,
+                    onPressed: (!coreInfo.readOnly && history.canRedo)
+                        ? redo
+                        : null,
+                  ),
                   IconButton(
                     style: IconButton.styleFrom(
                       fixedSize: const Size(44, 44),

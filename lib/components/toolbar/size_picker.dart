@@ -26,8 +26,6 @@ String _prettyNum(double num) {
 }
 
 class _SizePickerState extends State<SizePicker> {
-  static const _orange = Color(0xFFFF6B35);
-
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.of(context);
@@ -40,7 +38,6 @@ class _SizePickerState extends State<SizePicker> {
       min: pen.sizeMin,
       max: pen.sizeMax,
       step: pen.sizeStep,
-      activeColor: _orange,
       onChanged: (size) => setState(() => pen.options.size = size),
     );
 

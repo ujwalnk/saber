@@ -144,6 +144,7 @@ class EditorHistoryItem {
     required this.pageIndex,
     required this.strokes,
     required this.images,
+    this.replacementStrokes = const [],
     this.offset,
     this.page,
     this.quillChange,
@@ -182,6 +183,11 @@ class EditorHistoryItem {
   final int pageIndex;
   final List<Stroke> strokes;
   final List<EditorImage> images;
+
+  /// For [EditorHistoryItemType.erase] only: strokes that took the place of
+  /// [strokes] (the pieces left over when a stroke is partly erased).
+  /// Undoing puts [strokes] back and removes these.
+  final List<Stroke> replacementStrokes;
   final Rect? offset;
   final EditorPage? page;
   final DocChange? quillChange;
@@ -193,6 +199,7 @@ class EditorHistoryItem {
     int? pageIndex,
     List<Stroke>? strokes,
     List<EditorImage>? images,
+    List<Stroke>? replacementStrokes,
     Rect? offset,
     EditorPage? page,
     DocChange? quillChange,
@@ -204,6 +211,7 @@ class EditorHistoryItem {
       pageIndex: pageIndex ?? this.pageIndex,
       strokes: strokes ?? this.strokes,
       images: images ?? this.images,
+      replacementStrokes: replacementStrokes ?? this.replacementStrokes,
       offset: offset ?? this.offset,
       page: page ?? this.page,
       quillChange: quillChange ?? this.quillChange,

@@ -25,16 +25,12 @@ class ToolbarIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.of(context);
-    final bool isDark = Theme.brightnessOf(context) == .dark;
 
-    // One UI tokens: selected pill #4E4E50 (dark) / #E2E2E4 (light),
-    // icon color #E8E8E8 (dark) / #3A3A3C (light).
-    final Color selectedBg = isDark
-        ? const Color(0xFF4E4E50)
-        : const Color(0xFFE2E2E4);
-    final Color iconColor = isDark
-        ? const Color(0xFFE8E8E8)
-        : const Color(0xFF3A3A3C);
+    // Colors come from the app theme: the selected tool gets a
+    // secondaryContainer pill, the rest are flat.
+    final Color selectedBg = colorScheme.secondaryContainer;
+    final Color iconColor = colorScheme.onSurfaceVariant;
+    final Color selectedIconColor = colorScheme.onSecondaryContainer;
 
     final buttonStyle = ButtonStyle(
       backgroundColor: WidgetStateProperty.resolveWith((states) {
@@ -46,12 +42,14 @@ class ToolbarIconButton extends StatelessWidget {
         if (states.contains(WidgetState.disabled)) {
           return colorScheme.onSurface.withValues(alpha: 0.4);
         }
+        if (states.contains(WidgetState.selected)) return selectedIconColor;
         return iconColor;
       }),
       foregroundColor: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.disabled)) {
           return colorScheme.onSurface.withValues(alpha: 0.4);
         }
+        if (states.contains(WidgetState.selected)) return selectedIconColor;
         return iconColor;
       }),
       iconSize: const WidgetStatePropertyAll(20),
