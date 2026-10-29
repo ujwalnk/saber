@@ -6,6 +6,7 @@ import 'package:one_dollar_unistroke_recognizer/one_dollar_unistroke_recognizer.
 import 'package:path_drawing/path_drawing.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 import 'package:saber/components/canvas/_circle_stroke.dart';
+import 'package:saber/components/canvas/_fountain_nib.dart';
 import 'package:saber/components/canvas/_rectangle_stroke.dart';
 import 'package:saber/components/canvas/_stroke.dart';
 import 'package:saber/data/editor/page.dart';
@@ -146,6 +147,13 @@ class CanvasPainter extends CustomPainter {
           RRect.fromRectAndRadius(stroke.rect, Radius.circular(strokeSize / 4)),
           shapePaint,
         );
+      } else if (stroke.isFountainPenDot) {
+        // pen_pal draws a lone tap as a plain circle.
+        canvas.drawCircle(
+          stroke.fountainPenDotCenter,
+          FountainNib.dotRadius,
+          paint,
+        );
       } else {
         canvas.drawPath(_selectPath(stroke), paint);
       }
@@ -172,6 +180,15 @@ class CanvasPainter extends CustomPainter {
         ..setFloat(1, color.g)
         ..setFloat(2, color.b);
       paint.maskFilter = _getPencilMaskFilter(currentStroke!.options.size);
+    }
+
+    if (currentStroke!.isFountainPenDot) {
+      canvas.drawCircle(
+        currentStroke!.fountainPenDotCenter,
+        FountainNib.dotRadius,
+        paint,
+      );
+      return;
     }
 
     // Current stroke always uses high quality

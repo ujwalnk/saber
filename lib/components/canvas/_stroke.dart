@@ -7,6 +7,7 @@ import 'package:logging/logging.dart';
 import 'package:one_dollar_unistroke_recognizer/one_dollar_unistroke_recognizer.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 import 'package:saber/components/canvas/_circle_stroke.dart';
+import 'package:saber/components/canvas/_fountain_nib.dart';
 import 'package:saber/components/canvas/_rectangle_stroke.dart';
 import 'package:saber/data/extensions/list_extensions.dart';
 import 'package:saber/data/extensions/point_extensions.dart';
@@ -41,12 +42,20 @@ class Stroke {
       _highQualityPolygon ??= getPolygon(quality: .high);
 
   Path? _lowQualityPath, _highQualityPath;
-  Path get lowQualityPath => _lowQualityPath ??= getPath(
-    lowQualityPolygon,
-    // The fountain pen uses the same smooth curve at every zoom level.
-    smooth: toolId == .fountainPen,
+  Path get lowQualityPath =>
+      _lowQualityPath ??= getPath(lowQualityPolygon, smooth: false);
+  // The fountain pen fills the raw outline polygon (like pen_pal's
+  // `Path.addPolygon`), never the quadratic-smoothed version.
+  Path get highQualityPath => _highQualityPath ??= getPath(
+    highQualityPolygon,
+    smooth: toolId != .fountainPen,
   );
-  Path get highQualityPath => _highQualityPath ??= getPath(highQualityPolygon);
+
+  /// True when this stroke is a single tap of the fountain pen, which pen_pal
+  /// draws as a plain circle (see [FountainNib.dotRadius]).
+  bool get isFountainPenDot =>
+      toolId == .fountainPen && runtimeType == Stroke && points.length == 1;
+  Offset get fountainPenDotCenter => Offset(points.first.dx, points.first.dy);
 
   void shift(Offset offset) {
     if (offset == .zero) return;
@@ -227,38 +236,26 @@ class Stroke {
     if (!pressureEnabled) {
       options.simulatePressure = false;
     }
-    // The fountain pen derives its width from the nib model below,
-    // so it never simulates (or remembers) pressure.
-    final useNib = toolId == .fountainPen;
-    final rememberSimulatedPressure =
-        !useNib &&
-        quality == .high &&
-        options.simulatePressure &&
-        options.isComplete;
 
-    // The fountain pen keeps every point and its smoothing at all zoom
-    // levels, like the pen_pal prototype. Other tools use the cheaper
-    // low-quality version when zoomed out.
-    final skipped = skipPoints(points, useNib ? 1 : quality.N);
-    final qualityOptions = (quality == .low && !useNib)
+    // The fountain pen is a 1:1 port of pen_pal: every point is kept and the
+    // same outline is used at every zoom level.
+    if (toolId == .fountainPen) {
+      return FountainNib.polygon(points, isComplete: options.isComplete);
+    }
+
+    final rememberSimulatedPressure =
+        quality == .high && options.simulatePressure && options.isComplete;
+
+    final skipped = skipPoints(points, quality.N);
+    final qualityOptions = quality == .low
         ? options.copyWith(simulatePressure: false, smoothing: 0, streamline: 0)
         : options;
 
-    final polygon = useNib
-        ? getStroke(
-            _applyNibWidths(skipped),
-            // radius = size * (0.5 - thinning * (0.5 - pressure)), so with
-            // thinning 1 the diameter is size * 2 * pressure.
-            options: qualityOptions.copyWith(
-              simulatePressure: false,
-              thinning: 1.0,
-            ),
-          )
-        : getStroke(
-            skipped,
-            options: qualityOptions,
-            rememberSimulatedPressure: rememberSimulatedPressure,
-          );
+    final polygon = getStroke(
+      skipped,
+      options: qualityOptions,
+      rememberSimulatedPressure: rememberSimulatedPressure,
+    );
 
     if (rememberSimulatedPressure) {
       // Ensure we don't simulate pressure again
@@ -268,67 +265,6 @@ class Stroke {
     }
 
     return polygon;
-  }
-
-  /// Nib angle in degrees, measured counter-clockwise from horizontal
-  /// (calligraphy convention). Strokes along the nib edge are thinnest;
-  /// strokes at right angles to it are thickest.
-  static const _nibAngleDegrees = 35.0;
-
-  /// Thinnest and thickest nib widths, as a multiple of [StrokeOptions.size].
-  static const _nibMinWidthRatio = 0.2;
-  static const _nibMaxWidthRatio = 1.0;
-
-  /// 0 = no smoothing, close to 1 = heavy smoothing of width changes.
-  static const _nibSmoothing = 0.6;
-
-  /// Segments shorter than this (in logical pixels) are treated as
-  /// "no movement" and hold the previous width instead of jumping.
-  static const _nibMinSegmentLength = 0.5;
-
-  /// Returns copies of [source] whose pressure encodes the nib width.
-  ///
-  /// Width depends only on the direction of movement relative to the nib
-  /// angle (smoothed over successive points). Stylus pressure is ignored.
-  /// Pressure is set to `ratio / 2` because, with thinning = 1, a pressure
-  /// of 0.5 gives a diameter of exactly [StrokeOptions.size].
-  List<PointVector> _applyNibWidths(List<PointVector> source) {
-    if (source.isEmpty) return source;
-
-    const midRatio = (_nibMinWidthRatio + _nibMaxWidthRatio) / 2;
-    const minSegmentSquared = _nibMinSegmentLength * _nibMinSegmentLength;
-    // Negated because screen y points down (counter-clockwise on screen).
-    final nibAngle = -_nibAngleDegrees * pi / 180;
-
-    // ratios[i] is the width for source[i + 1]; source[0] reuses ratios[0].
-    final ratios = <double>[];
-    double? smoothed;
-    for (var i = 1; i < source.length; i++) {
-      final dx = source[i].dx - source[i - 1].dx;
-      final dy = source[i].dy - source[i - 1].dy;
-
-      if (dx * dx + dy * dy >= minSegmentSquared) {
-        // |sin| is symmetric: moving along the nib edge -> 0 (thin),
-        // perpendicular to it -> 1 (thick), same in both directions.
-        final factor = sin(atan2(dy, dx) - nibAngle).abs();
-        final raw =
-            _nibMinWidthRatio +
-            (_nibMaxWidthRatio - _nibMinWidthRatio) * factor;
-        smoothed = smoothed == null
-            ? raw
-            : smoothed + (raw - smoothed) * (1 - _nibSmoothing);
-      }
-      ratios.add(smoothed ?? midRatio);
-    }
-
-    PointVector withRatio(PointVector p, double ratio) =>
-        PointVector(p.dx, p.dy, ratio / 2);
-
-    return [
-      withRatio(source.first, ratios.isEmpty ? midRatio : ratios.first),
-      for (var i = 1; i < source.length; i++)
-        withRatio(source[i], ratios[i - 1]),
-    ];
   }
 
   /// Returns a [Path] that represents the stroke.
