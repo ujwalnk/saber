@@ -198,6 +198,20 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// Radius of the eraser, in page units. Set from the eraser popup.
+  final eraserSize = PlainStow<double>(
+    'eraserSize',
+    10,
+    volatile: !_isOnMainIsolate,
+  );
+
+  /// When true, the eraser only touches highlighter strokes.
+  final eraseHighlighterOnly = PlainStow(
+    'eraseHighlighterOnly',
+    false,
+    volatile: !_isOnMainIsolate,
+  );
+
   /// Names of every `ToolbarItem`, in the order they appear in the toolbar.
   final toolbarItemOrder = PlainStow(
     'toolbarItemOrder',

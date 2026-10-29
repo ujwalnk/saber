@@ -9,6 +9,7 @@ import 'package:keybinder/keybinder.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:saber/components/theming/dynamic_material_app.dart';
 import 'package:saber/components/toolbar/color_bar.dart';
+import 'package:saber/components/toolbar/eraser_modal.dart';
 import 'package:saber/components/toolbar/export_bar.dart';
 import 'package:saber/components/toolbar/pen_modal.dart';
 import 'package:saber/components/toolbar/selection_bar.dart';
@@ -87,22 +88,27 @@ class _ToolbarState extends State<Toolbar> {
   ValueNotifier<bool> showColorOptions = ValueNotifier(false);
   ValueNotifier<ToolOptions> toolOptionsType = ValueNotifier(ToolOptions.hide);
 
-  /// The pen / highlighter / pencil options are a small popover overlay,
-  /// attached to the toolbar bar through [_optionsLink].
+  /// The pen / highlighter / pencil / eraser options and the color picker
+  /// are small popover overlays, attached to the toolbar bar through
+  /// [_optionsLink]. Only one of them is open at a time.
   final LayerLink _optionsLink = LayerLink();
   final OverlayPortalController _optionsPortal = OverlayPortalController();
   final Object _optionsTapGroup = Object();
 
-  void _onToolOptionsTypeChanged() {
+  static bool _isToolPopover(ToolOptions type) => switch (type) {
+    ToolOptions.pen ||
+    ToolOptions.highlighter ||
+    ToolOptions.pencil ||
+    ToolOptions.eraser => true,
+    _ => false,
+  };
+
+  void _syncPopover() {
     // Wait for the frame: this can be triggered while building.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final wantShown = switch (toolOptionsType.value) {
-        ToolOptions.pen ||
-        ToolOptions.highlighter ||
-        ToolOptions.pencil => true,
-        _ => false,
-      };
+      final wantShown =
+          showColorOptions.value || _isToolPopover(toolOptionsType.value);
       if (wantShown && !_optionsPortal.isShowing) {
         _optionsPortal.show();
       } else if (!wantShown && _optionsPortal.isShowing) {
@@ -111,10 +117,33 @@ class _ToolbarState extends State<Toolbar> {
     });
   }
 
+  void _onToolOptionsTypeChanged() {
+    if (_isToolPopover(toolOptionsType.value) && showColorOptions.value) {
+      showColorOptions.value = false;
+    }
+    _syncPopover();
+  }
+
+  void _onShowColorOptionsChanged() {
+    if (showColorOptions.value && _isToolPopover(toolOptionsType.value)) {
+      toolOptionsType.value = ToolOptions.hide;
+    }
+    _syncPopover();
+  }
+
+  void _closePopovers() {
+    // The selection bar isn't a popover, so leave it alone.
+    if (_isToolPopover(toolOptionsType.value)) {
+      toolOptionsType.value = ToolOptions.hide;
+    }
+    showColorOptions.value = false;
+  }
+
   @override
   void initState() {
     _assignKeybindings();
     toolOptionsType.addListener(_onToolOptionsTypeChanged);
+    showColorOptions.addListener(_onShowColorOptionsChanged);
 
     DynamicMaterialApp.addFullscreenListener(_setState);
 
@@ -379,19 +408,56 @@ class _ToolbarState extends State<Toolbar> {
     );
   }
 
-  /// The pen / highlighter / pencil options: a small popover attached to the
+  Color? _currentColorOf(Tool tool) => switch (tool) {
+    final Pen pen => pen.color,
+    final Select select => select.getDominantStrokeColor(),
+    _ => null,
+  };
+
+  /// The popover that is currently open, or null.
+  Widget? _buildPopover(BuildContext context, double width) {
+    if (showColorOptions.value) {
+      final brightness = Theme.brightnessOf(context);
+      return ColorBar(
+        width: width,
+        setColor: widget.setColor,
+        currentColor: _currentColorOf(widget.currentTool),
+        invert: stows.editorAutoInvert.value && brightness == .dark,
+      );
+    }
+    return switch (toolOptionsType.value) {
+      ToolOptions.pen => PenModal(
+        getTool: () => Pen.currentPen,
+        setTool: widget.setTool,
+        width: width,
+      ),
+      ToolOptions.highlighter => PenModal(
+        getTool: () => Highlighter.currentHighlighter,
+        setTool: widget.setTool,
+        width: width,
+      ),
+      ToolOptions.pencil => PenModal(
+        getTool: () => Pencil.currentPencil,
+        setTool: widget.setTool,
+        width: width,
+      ),
+      ToolOptions.eraser => EraserModal(width: width),
+      _ => null,
+    };
+  }
+
+  /// The tool options / color picker: a small popover attached to the
   /// toolbar bar, on the side facing the page.
   Widget _buildOptionsOverlay(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: toolOptionsType,
-      builder: (context, type, _) {
-        final Tool Function()? getTool = switch (type) {
-          ToolOptions.pen => () => Pen.currentPen,
-          ToolOptions.highlighter => () => Highlighter.currentHighlighter,
-          ToolOptions.pencil => () => Pencil.currentPencil,
-          _ => null,
-        };
-        if (getTool == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: Listenable.merge([toolOptionsType, showColorOptions]),
+      builder: (context, _) {
+        final width = min(
+          PenModal.defaultWidth,
+          MediaQuery.sizeOf(context).width - 16,
+        );
+        final popover = _buildPopover(context, width);
+        if (popover == null) return const SizedBox.shrink();
 
         final (
           targetAnchor,
@@ -419,10 +485,6 @@ class _ToolbarState extends State<Toolbar> {
             const Offset(-6, 8),
           ),
         };
-        final width = min(
-          PenModal.defaultWidth,
-          MediaQuery.sizeOf(context).width - 16,
-        );
 
         return Align(
           alignment: Alignment.topLeft,
@@ -435,14 +497,10 @@ class _ToolbarState extends State<Toolbar> {
             child: TapRegion(
               groupId: _optionsTapGroup,
               // Tapping the page closes the popover but still draws.
-              onTapOutside: (_) => toolOptionsType.value = ToolOptions.hide,
+              onTapOutside: (_) => _closePopovers(),
               child: Material(
                 type: MaterialType.transparency,
-                child: PenModal(
-                  getTool: getTool,
-                  setTool: widget.setTool,
-                  width: width,
-                ),
+                child: popover,
               ),
             ),
           ),
@@ -469,11 +527,7 @@ class _ToolbarState extends State<Toolbar> {
         ? Toolbar._buttonPaddingVertical
         : Toolbar._buttonPaddingHorizontal;
 
-    final currentColor = switch (widget.currentTool) {
-      final Pen pen => pen.color,
-      final Select select => select.getDominantStrokeColor(),
-      _ => null,
-    };
+    final currentColor = _currentColorOf(widget.currentTool);
 
     if (widget.currentTool == Select.currentSelect) {
       // Enable selection bar only when selection is done
@@ -634,7 +688,17 @@ class _ToolbarState extends State<Toolbar> {
           tooltip: t.editor.toolbar.toggleEraser,
           selected: widget.currentTool is Eraser,
           enabled: !widget.readOnly,
-          onPressed: toggleEraser,
+          onPressed: () {
+            if (widget.currentTool is Eraser) {
+              // already using the eraser: open / close its options
+              toolOptionsType.value = toolOptionsType.value == .eraser
+                  ? .hide
+                  : .eraser;
+            } else {
+              toolOptionsType.value = .hide;
+              widget.setTool(Eraser());
+            }
+          },
           padding: buttonPadding,
           child: _toolIcon(
             Symbols.ink_eraser,
@@ -716,30 +780,11 @@ class _ToolbarState extends State<Toolbar> {
                 duplicateSelection: widget.duplicateSelection,
                 deleteSelection: widget.deleteSelection,
               ),
-              // pen, highlighter and pencil options are in the overlay
+              // pen, highlighter, pencil and eraser options are in the overlay
               _ => const SizedBox.square(dimension: SizePicker.smallLength),
             },
           );
         },
-      ),
-      ValueListenableBuilder(
-        valueListenable: showColorOptions,
-        builder: (context, showColorOptions, child) {
-          return Collapsible(
-            axis: isToolbarVertical
-                ? CollapsibleAxis.horizontal
-                : CollapsibleAxis.vertical,
-            maintainState: true,
-            collapsed: !showColorOptions,
-            child: child!,
-          );
-        },
-        child: ColorBar(
-          axis: isToolbarVertical ? Axis.vertical : Axis.horizontal,
-          setColor: widget.setColor,
-          currentColor: currentColor,
-          invert: invert,
-        ),
       ),
       ValueListenableBuilder(
         valueListenable: widget.quillFocus,
@@ -846,6 +891,7 @@ class _ToolbarState extends State<Toolbar> {
   @override
   void dispose() {
     toolOptionsType.removeListener(_onToolOptionsTypeChanged);
+    showColorOptions.removeListener(_onShowColorOptionsChanged);
     DynamicMaterialApp.removeFullscreenListener(_setState);
     DynamicMaterialApp.setFullscreen(false, updateSystem: true);
 
@@ -854,4 +900,4 @@ class _ToolbarState extends State<Toolbar> {
   }
 }
 
-enum ToolOptions { hide, pen, highlighter, pencil, select }
+enum ToolOptions { hide, pen, highlighter, pencil, eraser, select }

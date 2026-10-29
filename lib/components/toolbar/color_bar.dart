@@ -14,13 +14,14 @@ typedef NamedColor = ({String name, Color color});
 class ColorBar extends StatefulWidget {
   const new({
     super.key,
-    required this.axis,
+    required this.width,
     required this.setColor,
     required this.currentColor,
     required this.invert,
   });
 
-  final Axis axis;
+  /// Width of the popup panel.
+  final double width;
   final ValueChanged<Color> setColor;
   final Color? currentColor;
   final bool invert;
@@ -167,143 +168,151 @@ class ColorBar extends StatefulWidget {
 class _ColorBarState extends State<ColorBar> {
   static var pickedColor = const Color.fromRGBO(255, 0, 0, 1);
 
+  bool _isSelected(Color color) =>
+      widget.currentColor?.withAlpha(255).toARGB32() == color.toARGB32();
+
+  /// One round color swatch. A null [color] is an empty placeholder slot.
+  Widget _swatch(
+    ColorScheme colorScheme, {
+    required Color? color,
+    required String? tooltip,
+    VoidCallback? onTap,
+    VoidCallback? onLongPress,
+  }) {
+    return ColorOption(
+      isSelected: color != null && _isSelected(color),
+      enabled: widget.currentColor != null,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      tooltip: tooltip,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color?.withInversion(widget.invert) ?? Colors.transparent,
+          shape: .circle,
+          border: Border.all(
+            color: colorScheme.onSurface.withValues(alpha: 0.2),
+            width: 1,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// A row of swatches that wraps onto more lines, led by a small icon.
+  Widget _section(IconData icon, List<Widget> children) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: ColorOption.diameter,
+          child: Center(child: ColorOptionSeparatorIcon(icon: icon)),
+        ),
+        Expanded(child: Wrap(runSpacing: 4, children: children)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.of(context);
 
-    final children = <Widget>[
+    Widget savedColor(String colorString) {
+      final color = Color(int.parse(colorString));
+      return _swatch(
+        colorScheme,
+        color: color,
+        tooltip: ColorBar.findColorName(color),
+        onTap: () => widget.setColor(color),
+        onLongPress: () =>
+            setState(() => ColorBar.toggleColorPinned(colorString)),
+      );
+    }
+
+    final sections = <Widget>[
       // pinned colors
-      if (stows.pinnedColors.value.isNotEmpty) ...[
-        const ColorOptionSeparatorIcon(icon: Icons.pin_drop),
-        for (final colorString in stows.pinnedColors.value)
-          ColorOption(
-            isSelected:
-                widget.currentColor?.withAlpha(255).toARGB32() ==
-                int.parse(colorString),
-            enabled: widget.currentColor != null,
-            onTap: () => widget.setColor(Color(int.parse(colorString))),
-            onLongPress: () =>
-                setState(() => ColorBar.toggleColorPinned(colorString)),
-            tooltip: ColorBar.findColorName(Color(int.parse(colorString))),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Color(int.parse(colorString))
-                    .withInversion(widget.invert),
-                shape: .circle,
-                border: Border.all(
-                  color: colorScheme.onSurface.withValues(alpha: 0.2),
-                  width: 1,
-                ),
-              ),
-            ),
-          ),
-      ],
+      if (stows.pinnedColors.value.isNotEmpty)
+        _section(Icons.pin_drop, [
+          for (final colorString in stows.pinnedColors.value)
+            savedColor(colorString),
+        ]),
 
-      const ColorOptionSeparatorIcon(icon: Icons.history),
+      // recent colors, with placeholders up to `recentColorsLength`
+      _section(Icons.history, [
+        for (final colorString in stows.recentColorsPositioned.value.reversed)
+          savedColor(colorString),
+        for (
+          int i = 0;
+          i <
+              stows.recentColorsLength.value -
+                  stows.recentColorsPositioned.value.length;
+          ++i
+        )
+          _swatch(colorScheme, color: null, tooltip: null),
+      ]),
 
-      // recent colors
-      for (final colorString in stows.recentColorsPositioned.value.reversed)
+      // custom color picker, then the presets
+      _section(Icons.palette, [
         ColorOption(
-          isSelected:
-              widget.currentColor?.withAlpha(255).toARGB32() ==
-              int.parse(colorString),
-          enabled: widget.currentColor != null,
-          onTap: () => widget.setColor(Color(int.parse(colorString))),
-          onLongPress: () =>
-              setState(() => ColorBar.toggleColorPinned(colorString)),
-          tooltip: ColorBar.findColorName(Color(int.parse(colorString))),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Color(int.parse(colorString)).withInversion(widget.invert),
-              shape: .circle,
-              border: Border.all(
-                color: colorScheme.onSurface.withValues(alpha: 0.2),
-                width: 1,
-              ),
-            ),
-          ),
-        ),
-      // placeholders for `recentColorsLength` recent colors
-      for (
-        int i = 0;
-        i <
-            stows.recentColorsLength.value -
-                stows.recentColorsPositioned.value.length;
-        ++i
-      )
-        ColorOption(
-          isSelected: false,
-          enabled: widget.currentColor != null,
-          onTap: null,
-          tooltip: null,
-          child: DecoratedBox(
+          isSelected: _isSelected(pickedColor),
+          enabled: true,
+          onTap: () => openColorPicker(context),
+          tooltip: t.editor.colors.colorPicker,
+          child: const DecoratedBox(
             decoration: BoxDecoration(
               color: Colors.transparent,
               shape: .circle,
-              border: Border.all(
-                color: colorScheme.onSurface.withValues(alpha: 0.2),
-                width: 1,
-              ),
             ),
+            child: Center(child: FaIcon(FontAwesomeIcons.droplet, size: 16)),
           ),
         ),
-
-      const ColorOptionSeparatorIcon(icon: Icons.palette),
-
-      // custom color
-      ColorOption(
-        isSelected:
-            widget.currentColor?.withAlpha(255).toARGB32() ==
-            pickedColor.toARGB32(),
-        enabled: true,
-        onTap: () => openColorPicker(context),
-        tooltip: t.editor.colors.colorPicker,
-        child: const DecoratedBox(
-          decoration: BoxDecoration(color: Colors.transparent, shape: .circle),
-          child: Center(child: FaIcon(FontAwesomeIcons.droplet, size: 16)),
-        ),
-      ),
-
-      // color presets
-      for (final namedColor in ColorBar.colorPresets)
-        ColorOption(
-          isSelected:
-              widget.currentColor?.withAlpha(255).toARGB32() ==
-              namedColor.color.toARGB32(),
-          enabled: widget.currentColor != null,
-          onTap: () => widget.setColor(namedColor.color),
-          tooltip: namedColor.name,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: namedColor.color.withInversion(widget.invert),
-              shape: .circle,
-              border: Border.all(
-                color: colorScheme.onSurface.withValues(alpha: 0.2),
-                width: 1,
-              ),
-            ),
+        for (final namedColor in ColorBar.colorPresets)
+          _swatch(
+            colorScheme,
+            color: namedColor.color,
+            tooltip: namedColor.name,
+            onTap: () => widget.setColor(namedColor.color),
           ),
-        ),
+      ]),
     ];
 
-    return Center(
+    return SizedBox(
+      width: widget.width,
       child: SamsungPanel(
         padding: const .all(10),
-        child: SingleChildScrollView(
-          scrollDirection: widget.axis,
-          child: Flex(direction: widget.axis, children: children),
+        borderRadius: 16,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.5,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < sections.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 8),
+                  sections[i],
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
   void openColorPicker(BuildContext context) async {
+    // This popup closes as soon as the dialog is tapped, so don't read from
+    // `widget` after the await.
+    final setColor = widget.setColor;
+    final invert = widget.invert;
+
     final bool? confirmChange = await showDialog(
       context: context,
       builder: (BuildContext context) => _colorPickerDialog(context),
     );
     if (confirmChange ?? false) {
-      widget.setColor(pickedColor.withInversion(widget.invert));
+      setColor(pickedColor.withInversion(invert));
     }
   }
 

@@ -19,6 +19,7 @@ import 'package:saber/components/canvas/_asset_cache.dart';
 import 'package:saber/components/canvas/_stroke.dart';
 import 'package:saber/components/canvas/canvas.dart';
 import 'package:saber/components/canvas/canvas_gesture_detector.dart';
+import 'package:saber/components/canvas/eraser_cursor.dart';
 import 'package:saber/components/canvas/canvas_image.dart';
 import 'package:saber/components/canvas/image/editor_image.dart';
 import 'package:saber/components/canvas/save_indicator.dart';
@@ -753,6 +754,49 @@ class EditorState extends State<Editor> {
     currentPressure = pressure;
   }
 
+  /// Where the pointer is, for the circle that shows the eraser's reach.
+  final ValueNotifier<EraserPointer?> _eraserPointer = ValueNotifier(null);
+
+  void _trackEraserPointer(PointerEvent event) {
+    if (currentTool is! Eraser) {
+      if (_eraserPointer.value != null) _eraserPointer.value = null;
+      return;
+    }
+    _eraserPointer.value = (local: event.localPosition, global: event.position);
+  }
+
+  void _pointerLeftCanvas(PointerEvent event) {
+    // A mouse or stylus keeps hovering after it lifts; a finger doesn't.
+    if (event.kind == PointerDeviceKind.touch) _eraserPointer.value = null;
+  }
+
+  /// The eraser's radius in screen pixels at [global]. The eraser's size is in
+  /// page units, so this depends on zoom and on how the page is fitted.
+  double? _eraserRadiusOnScreen(Offset global) {
+    final tool = currentTool;
+    if (tool is! Eraser) return null;
+
+    EditorPage? page;
+    final index = onWhichPageIsFocalPoint(global);
+    if (index != null) {
+      page = coreInfo.pages[index];
+    } else {
+      for (final candidate in coreInfo.pages) {
+        if (candidate.renderBox != null) {
+          page = candidate;
+          break;
+        }
+      }
+    }
+    final box = page?.renderBox;
+    if (box == null || !box.attached) return null;
+
+    final transform = box.getTransformTo(null);
+    final origin = MatrixUtils.transformPoint(transform, Offset.zero);
+    final unitX = MatrixUtils.transformPoint(transform, const Offset(1, 0));
+    return tool.size * (unitX - origin).distance;
+  }
+
   void onHovering() {
     isHovering = true;
   }
@@ -1417,6 +1461,34 @@ class EditorState extends State<Editor> {
       transformationController: _transformationController,
     );
 
+    // The circle showing the eraser's area of effect is drawn over the canvas.
+    final Widget canvasArea = Stack(
+      fit: StackFit.expand,
+      children: [
+        MouseRegion(
+          opaque: false,
+          onExit: (_) => _eraserPointer.value = null,
+          child: Listener(
+            onPointerHover: _trackEraserPointer,
+            onPointerDown: _trackEraserPointer,
+            onPointerMove: _trackEraserPointer,
+            onPointerUp: _pointerLeftCanvas,
+            onPointerCancel: (_) => _eraserPointer.value = null,
+            child: canvas,
+          ),
+        ),
+        if (currentTool is Eraser)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: EraserCursor(
+                pointer: _eraserPointer,
+                radiusAt: _eraserRadiusOnScreen,
+              ),
+            ),
+          ),
+      ],
+    );
+
     final readonlyBanner = ReadOnlyBanner(
       coreInfo.readOnlyReason,
       action: coreInfo.readOnlyReason == .versionTooNew
@@ -1623,7 +1695,7 @@ class EditorState extends State<Editor> {
               Expanded(
                 child: Column(
                   children: [
-                    Expanded(child: canvas),
+                    Expanded(child: canvasArea),
                     readonlyBanner,
                   ],
                 ),
@@ -1636,7 +1708,7 @@ class EditorState extends State<Editor> {
                 ? VerticalDirection.up
                 : VerticalDirection.down,
             children: [
-              Expanded(child: canvas),
+              Expanded(child: canvasArea),
               buildToolbar(alignment),
               readonlyBanner,
             ],
@@ -2220,6 +2292,7 @@ class EditorState extends State<Editor> {
 
     super.dispose();
     showExportOptions.dispose();
+    _eraserPointer.dispose();
   }
 
   Future<void> _cleanUpAsync() async {
