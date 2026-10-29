@@ -170,6 +170,10 @@ class EditorState extends State<Editor> {
 
   ValueNotifier<QuillStruct?> quillFocus = ValueNotifier(null);
 
+  /// Whether the export panel is open. Toggled by the share button in the top
+  /// bar and shown next to the toolbar.
+  final ValueNotifier<bool> showExportOptions = ValueNotifier(false);
+
   /// The last non-Eraser [currentTool] value.
   late Tool _lastNonEraserTool = Pen.currentPen;
 
@@ -1588,10 +1592,6 @@ class EditorState extends State<Editor> {
                   ..focusNode.requestFocus();
               }
             }),
-            undo: undo,
-            isUndoPossible: history.canUndo,
-            redo: redo,
-            isRedoPossible: history.canRedo,
             toggleFingerDrawing: () {
               stows.editorFingerDrawing.value =
                   !stows.editorFingerDrawing.value;
@@ -1599,6 +1599,7 @@ class EditorState extends State<Editor> {
             },
             pickPhoto: _pickPhotos,
             paste: paste,
+            showExportOptions: showExportOptions,
             exportAsSba: exportAsSba,
             exportAsPdf: exportAsPdf,
             exportAsPng: exportAsPng,
@@ -1735,6 +1736,51 @@ class EditorState extends State<Editor> {
                     onPressed: (!coreInfo.readOnly && history.canRedo)
                         ? redo
                         : null,
+                  ),
+                  IconButton(
+                    style: IconButton.styleFrom(
+                      fixedSize: const Size(44, 44),
+                      padding: EdgeInsets.zero,
+                      shape: const CircleBorder(),
+                    ),
+                    icon: const AdaptiveIcon(
+                      icon: Icons.fullscreen,
+                      cupertinoIcon: CupertinoIcons.fullscreen,
+                    ),
+                    tooltip: t.editor.toolbar.fullscreen,
+                    onPressed: !coreInfo.readOnly
+                        ? () => DynamicMaterialApp.setFullscreen(
+                            !DynamicMaterialApp.isFullscreen,
+                            updateSystem: true,
+                          )
+                        : null,
+                  ),
+                  ValueListenableBuilder(
+                    valueListenable: showExportOptions,
+                    builder: (context, showExport, child) {
+                      return IconButton(
+                        style: IconButton.styleFrom(
+                          fixedSize: const Size(44, 44),
+                          padding: EdgeInsets.zero,
+                          shape: const CircleBorder(),
+                          backgroundColor: showExport
+                              ? colorScheme.secondaryContainer
+                              : null,
+                          foregroundColor: showExport
+                              ? colorScheme.onSecondaryContainer
+                              : null,
+                        ),
+                        icon: child!,
+                        tooltip: t.editor.toolbar.export,
+                        onPressed: !coreInfo.readOnly
+                            ? () => showExportOptions.value = !showExport
+                            : null,
+                      );
+                    },
+                    child: const AdaptiveIcon(
+                      icon: Icons.share,
+                      cupertinoIcon: CupertinoIcons.share,
+                    ),
                   ),
                   IconButton(
                     style: IconButton.styleFrom(
@@ -2164,6 +2210,7 @@ class EditorState extends State<Editor> {
     stows.lastShapePenOptions.notifyListeners();
 
     super.dispose();
+    showExportOptions.dispose();
   }
 
   Future<void> _cleanUpAsync() async {

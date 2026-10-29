@@ -4,6 +4,9 @@ import 'package:saber/data/prefs.dart';
 
 /// Everything that can appear in the editor toolbar.
 ///
+/// Undo, redo, fullscreen and export live in the editor's top bar, so they
+/// are not part of this list.
+///
 /// The order and visibility are user-configurable (Settings > Customize
 /// toolbar) and stored in [Stows.toolbarItemOrder] / [Stows.toolbarItemsHidden].
 enum ToolbarItem {
@@ -18,9 +21,7 @@ enum ToolbarItem {
   eraser('Eraser', Symbols.ink_eraser),
   photo('Photo', Symbols.image),
   text('Text', Symbols.text_fields),
-  fingerDrawing('Finger drawing', Symbols.touch_app),
-  fullscreen('Fullscreen', Symbols.fullscreen),
-  export('Export', Symbols.ios_share);
+  fingerDrawing('Finger drawing', Symbols.touch_app);
 
   const ToolbarItem(this.label, this.icon);
 
