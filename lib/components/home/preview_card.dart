@@ -55,6 +55,16 @@ class _PreviewCardState extends State<PreviewCard> {
   }
 
   @override
+  void didUpdateWidget(PreviewCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // The selection can be cleared from outside (e.g. after moving, renaming
+    // or recoloring notes), so keep the card's selected overlay in sync.
+    // Otherwise it stays faded out and looks like an empty slot.
+    if (expanded.value != widget.selected) expanded.value = widget.selected;
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
 
