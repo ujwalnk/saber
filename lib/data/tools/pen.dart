@@ -9,6 +9,7 @@ import 'package:saber/data/editor/page.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:saber/data/tools/_tool.dart';
 import 'package:saber/data/tools/highlighter.dart';
+import 'package:saber/data/tools/marker.dart';
 import 'package:saber/data/tools/pencil.dart';
 import 'package:saber/i18n/strings.g.dart';
 import 'package:sbn/tool_id.dart';
@@ -75,6 +76,7 @@ class Pen extends Tool {
       'Use Highlighter.currentHighlighter instead',
     );
     assert(currentPen is! Pencil, 'Use Pencil.currentPencil instead');
+    assert(currentPen is! Marker, 'Use Marker.currentMarker instead');
     _currentPen = currentPen;
   }
 

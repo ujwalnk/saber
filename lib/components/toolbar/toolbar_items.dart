@@ -10,9 +10,7 @@ import 'package:saber/data/prefs.dart';
 /// The order and visibility are user-configurable (Settings > Customize
 /// toolbar) and stored in [Stows.toolbarItemOrder] / [Stows.toolbarItemsHidden].
 enum ToolbarItem {
-  pen('Pen', Symbols.ink_pen),
-  pencil('Pencil', Symbols.edit),
-  highlighter('Highlighter', Symbols.ink_highlighter),
+  pen('Writing tools', Symbols.ink_pen),
   quickColors('Preset colors', Symbols.palette),
   quickWidths('Preset stroke widths', Symbols.line_weight),
   colorPalette('All colors', Symbols.colorize),

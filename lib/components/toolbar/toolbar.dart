@@ -12,18 +12,18 @@ import 'package:saber/components/toolbar/color_bar.dart';
 import 'package:saber/components/toolbar/eraser_modal.dart';
 import 'package:saber/components/toolbar/export_bar.dart';
 import 'package:saber/components/toolbar/pen_modal.dart';
+import 'package:saber/components/toolbar/selection_bar.dart';
 import 'package:saber/components/toolbar/size_picker.dart';
 import 'package:saber/components/toolbar/toolbar_button.dart';
 import 'package:saber/components/toolbar/toolbar_items.dart';
+import 'package:saber/components/toolbar/writing_tool.dart';
 import 'package:saber/data/editor/page.dart';
 import 'package:saber/data/extensions/color_extensions.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:saber/data/tools/_tool.dart';
 import 'package:saber/data/tools/eraser.dart';
-import 'package:saber/data/tools/highlighter.dart';
 import 'package:saber/data/tools/laser_pointer.dart';
 import 'package:saber/data/tools/pen.dart';
-import 'package:saber/data/tools/pencil.dart';
 import 'package:saber/data/tools/select.dart';
 import 'package:saber/data/tools/shape_pen.dart';
 import 'package:saber/i18n/strings.g.dart';
@@ -41,6 +41,8 @@ class Toolbar extends StatefulWidget {
     required this.toggleFingerDrawing,
     required this.pickPhoto,
     required this.paste,
+    required this.duplicateSelection,
+    required this.deleteSelection,
     required this.showExportOptions,
     required this.exportAsSba,
     required this.exportAsPdf,
@@ -63,8 +65,10 @@ class Toolbar extends StatefulWidget {
 
   final VoidCallback paste;
 
+  final VoidCallback duplicateSelection;
+  final VoidCallback deleteSelection;
 
-  /// Whether the export bar is open. Opened from the editor's 3-dot menu.
+  /// Whether the export bar is open. Toggled from the editor's top bar.
   final ValueNotifier<bool> showExportOptions;
 
   final Future Function(BuildContext)? exportAsSba;
@@ -83,136 +87,20 @@ class _ToolbarState extends State<Toolbar> {
   ValueNotifier<bool> showColorOptions = ValueNotifier(false);
   ValueNotifier<ToolOptions> toolOptionsType = ValueNotifier(ToolOptions.hide);
 
-  /// The pen / highlighter / pencil / eraser options and the color picker
-  /// are small popover overlays, attached to the toolbar bar through
-  /// [_optionsLink]. Only one of them is open at a time.
+  /// The pen / highlighter / pencil options are a small popover overlay,
+  /// attached to the toolbar bar through [_optionsLink].
   final LayerLink _optionsLink = LayerLink();
   final OverlayPortalController _optionsPortal = OverlayPortalController();
   final Object _optionsTapGroup = Object();
 
-  /// The toolbar buttons that open a popover. Each gets its own link so the
-  /// popover opens next to the button, not at the start of the toolbar.
-  final _anchorLinks = {for (final a in _Anchor.values) a: LayerLink()};
-  final _anchorKeys = {for (final a in _Anchor.values) a: GlobalKey()};
-
-  Widget _anchored(_Anchor anchor, Widget child) {
-    return CompositedTransformTarget(
-      key: _anchorKeys[anchor],
-      link: _anchorLinks[anchor]!,
-      child: child,
-    );
-  }
-
-  /// The button the open popover belongs to, if any.
-  _Anchor? get _activeAnchor {
-    if (showColorOptions.value) return _Anchor.colors;
-    return switch (toolOptionsType.value) {
-      ToolOptions.pen => _Anchor.pen,
-      ToolOptions.pencil => _Anchor.pencil,
-      ToolOptions.highlighter => _Anchor.highlighter,
-      ToolOptions.eraser => _Anchor.eraser,
-      _ => null,
-    };
-  }
-
-  /// Where the popover goes: on the side of the toolbar that faces the page,
-  /// lined up with its button and kept on screen. Falls back to the start of
-  /// the toolbar if the button isn't shown (e.g. hidden in Customize toolbar).
-  ({LayerLink link, Alignment target, Alignment follower, Offset offset})
-  _placement(BuildContext context, double width) {
-    final edge = stows.editorToolbarAlignment.value;
-    final anchor = _activeAnchor;
-    final box = anchor == null
-        ? null
-        : _anchorKeys[anchor]!.currentContext?.findRenderObject();
-
-    if (anchor != null && box is RenderBox && box.attached && box.hasSize) {
-      final screen = MediaQuery.sizeOf(context);
-      final center = box.localToGlobal(box.size.center(Offset.zero));
-      final link = _anchorLinks[anchor]!;
-
-      switch (edge) {
-        case AxisDirection.up || AxisDirection.down:
-          // Centered on the button, nudged back inside the screen.
-          final left = center.dx - width / 2;
-          final clamped = left.clamp(8.0, max(8.0, screen.width - width - 8));
-          final dx = clamped - left;
-          final under = edge == AxisDirection.up;
-          return (
-            link: link,
-            target: under ? Alignment.bottomCenter : Alignment.topCenter,
-            follower: under ? Alignment.topCenter : Alignment.bottomCenter,
-            offset: Offset(dx, under ? 6 : -6),
-          );
-        case AxisDirection.left || AxisDirection.right:
-          // Level with the button; grow upwards for buttons in the lower half
-          // so a tall popover doesn't run off the screen.
-          final lower = center.dy > screen.height / 2;
-          final onLeft = edge == AxisDirection.left;
-          return (
-            link: link,
-            target: switch ((onLeft, lower)) {
-              (true, false) => Alignment.topRight,
-              (true, true) => Alignment.bottomRight,
-              (false, false) => Alignment.topLeft,
-              (false, true) => Alignment.bottomLeft,
-            },
-            follower: switch ((onLeft, lower)) {
-              (true, false) => Alignment.topLeft,
-              (true, true) => Alignment.bottomLeft,
-              (false, false) => Alignment.topRight,
-              (false, true) => Alignment.bottomRight,
-            },
-            // also clears the toolbar's own padding
-            offset: Offset(onLeft ? 14 : -14, 0),
-          );
-      }
-    }
-
-    final (target, follower, offset) = switch (edge) {
-      AxisDirection.down => (
-        Alignment.topLeft,
-        Alignment.bottomLeft,
-        const Offset(8, -6),
-      ),
-      AxisDirection.up => (
-        Alignment.bottomLeft,
-        Alignment.topLeft,
-        const Offset(8, 6),
-      ),
-      AxisDirection.left => (
-        Alignment.topRight,
-        Alignment.topLeft,
-        const Offset(6, 8),
-      ),
-      AxisDirection.right => (
-        Alignment.topLeft,
-        Alignment.topRight,
-        const Offset(-6, 8),
-      ),
-    };
-    return (
-      link: _optionsLink,
-      target: target,
-      follower: follower,
-      offset: offset,
-    );
-  }
-
-  static bool _isToolPopover(ToolOptions type) => switch (type) {
-    ToolOptions.pen ||
-    ToolOptions.highlighter ||
-    ToolOptions.pencil ||
-    ToolOptions.eraser => true,
-    _ => false,
-  };
-
-  void _syncPopover() {
+  void _onToolOptionsTypeChanged() {
     // Wait for the frame: this can be triggered while building.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final wantShown =
-          showColorOptions.value || _isToolPopover(toolOptionsType.value);
+      final wantShown = switch (toolOptionsType.value) {
+        ToolOptions.pen || ToolOptions.eraser => true,
+        _ => false,
+      };
       if (wantShown && !_optionsPortal.isShowing) {
         _optionsPortal.show();
       } else if (!wantShown && _optionsPortal.isShowing) {
@@ -221,33 +109,10 @@ class _ToolbarState extends State<Toolbar> {
     });
   }
 
-  void _onToolOptionsTypeChanged() {
-    if (_isToolPopover(toolOptionsType.value) && showColorOptions.value) {
-      showColorOptions.value = false;
-    }
-    _syncPopover();
-  }
-
-  void _onShowColorOptionsChanged() {
-    if (showColorOptions.value && _isToolPopover(toolOptionsType.value)) {
-      toolOptionsType.value = ToolOptions.hide;
-    }
-    _syncPopover();
-  }
-
-  void _closePopovers() {
-    // The selection bar isn't a popover, so leave it alone.
-    if (_isToolPopover(toolOptionsType.value)) {
-      toolOptionsType.value = ToolOptions.hide;
-    }
-    showColorOptions.value = false;
-  }
-
   @override
   void initState() {
     _assignKeybindings();
     toolOptionsType.addListener(_onToolOptionsTypeChanged);
-    showColorOptions.addListener(_onShowColorOptionsChanged);
 
     DynamicMaterialApp.addFullscreenListener(_setState);
 
@@ -303,9 +168,23 @@ class _ToolbarState extends State<Toolbar> {
     if (_ctrlV != null) Keybinder.remove(_ctrlV!);
   }
 
+  /// Ctrl+E: switches the eraser on and off.
   void toggleEraser() {
     toolOptionsType.value = .hide;
     widget.setTool(Eraser()); // this toggles eraser
+  }
+
+  /// Eraser button: the first tap selects the eraser, tapping it again
+  /// opens/closes its size popup (like the pen, pencil and highlighter).
+  void _onEraserPressed() {
+    if (widget.currentTool is Eraser) {
+      toolOptionsType.value = toolOptionsType.value == .eraser
+          ? .hide
+          : .eraser;
+    } else {
+      toolOptionsType.value = .hide;
+      widget.setTool(Eraser());
+    }
   }
 
   void toggleColorOptions() {
@@ -342,18 +221,23 @@ class _ToolbarState extends State<Toolbar> {
     return best;
   }
 
-  /// Material Symbols glyph used for the current pen in the toolbar.
-  static IconData _penSymbol(Pen pen) {
-    final icon = pen.icon;
-    if (icon == Pen.ballpointPenIcon) return Symbols.draw;
-    if (icon == ShapePen.shapePenIcon) return Symbols.shapes;
-    return Symbols.ink_pen;
+  /// A Material Symbols icon, drawn filled while its tool is selected.
+  Widget _symbol(IconData icon, bool selected) =>
+      Icon(icon, fill: selected ? 1 : 0);
+
+  /// The writing tool (pen, pencil, marker, highlighter, ...) that the
+  /// unified selector currently represents: the active one, or the last one
+  /// used while another tool (eraser, select, ...) is active.
+  Pen _lastWritingPen = Pen.currentPen;
+  Pen get _activeWritingPen {
+    final tool = widget.currentTool;
+    if (tool is Pen) _lastWritingPen = tool;
+    return _lastWritingPen;
   }
 
-  /// A toolbar glyph: outlined normally, filled while its tool is selected.
-  Widget _toolIcon(IconData icon, {bool selected = false}) {
-    return Icon(icon, fill: selected ? 1 : 0);
-  }
+  /// The toolbar icon for the current writing tool.
+  IconData _penSymbol(Pen pen) =>
+      WritingTool.of(pen)?.icon ?? Symbols.shapes;
 
   /// Subtle Samsung-style grip handle. Only this starts a drag —
   /// every tool button keeps its normal tap behavior. Uses Flutter's
@@ -453,31 +337,31 @@ class _ToolbarState extends State<Toolbar> {
     final enabled = !widget.readOnly && currentColor != null;
     final isSelected =
         currentColor?.withAlpha(255).toARGB32() == color.toARGB32();
-    const diameter = 30.0;
+    // Same 48x48 footprint as [ToolbarIconButton], with the colour dot
+    // centred in it, so it lines up with the other buttons.
+    const diameter = 34.0;
 
-    // Same 48x48 footprint as [ToolbarIconButton] so the presets sit on the
-    // same line, with the same spacing, as the other tools.
     return Padding(
       padding: padding,
-      child: Tooltip(
-        message: ColorBar.findColorName(color),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: enabled ? () => widget.setColor(color) : null,
-          onLongPress: enabled
-              ? () {
-                  final replaced = List<String>.of(quickColors);
-                  replaced[index] = currentColor!
-                      .withAlpha(255)
-                      .toARGB32()
-                      .toString();
-                  stows.toolbarQuickColors.value = replaced;
-                  setState(() {});
-                }
-              : null,
-          child: SizedBox.square(
-            dimension: 48,
-            child: Center(
+      child: SizedBox.square(
+        dimension: 48,
+        child: Center(
+          child: Tooltip(
+            message: ColorBar.findColorName(color),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: enabled ? () => widget.setColor(color) : null,
+              onLongPress: enabled
+                  ? () {
+                      final replaced = List<String>.of(quickColors);
+                      replaced[index] = currentColor!
+                          .withAlpha(255)
+                          .toARGB32()
+                          .toString();
+                      stows.toolbarQuickColors.value = replaced;
+                      setState(() {});
+                    }
+                  : null,
               child: Container(
                 width: diameter,
                 height: diameter,
@@ -512,74 +396,72 @@ class _ToolbarState extends State<Toolbar> {
     );
   }
 
-  Color? _currentColorOf(Tool tool) => switch (tool) {
-    final Pen pen => pen.color,
-    final Select select => select.getDominantStrokeColor(),
-    _ => null,
-  };
-
-  /// The popover that is currently open, or null.
-  Widget? _buildPopover(BuildContext context, double width) {
-    if (showColorOptions.value) {
-      final brightness = Theme.brightnessOf(context);
-      return ColorBar(
-        width: width,
-        setColor: widget.setColor,
-        currentColor: _currentColorOf(widget.currentTool),
-        invert: stows.editorAutoInvert.value && brightness == .dark,
-      );
-    }
-    return switch (toolOptionsType.value) {
-      ToolOptions.pen => PenModal(
-        getTool: () => Pen.currentPen,
-        setTool: widget.setTool,
-        width: width,
-      ),
-      ToolOptions.highlighter => PenModal(
-        getTool: () => Highlighter.currentHighlighter,
-        setTool: widget.setTool,
-        width: width,
-      ),
-      ToolOptions.pencil => PenModal(
-        getTool: () => Pencil.currentPencil,
-        setTool: widget.setTool,
-        width: width,
-      ),
-      ToolOptions.eraser => EraserModal(width: width),
-      _ => null,
-    };
-  }
-
-  /// The tool options / color picker: a small popover attached to the
+  /// The pen / highlighter / pencil options: a small popover attached to the
   /// toolbar bar, on the side facing the page.
   Widget _buildOptionsOverlay(BuildContext context) {
-    return ListenableBuilder(
-      listenable: Listenable.merge([toolOptionsType, showColorOptions]),
-      builder: (context, _) {
+    return ValueListenableBuilder(
+      valueListenable: toolOptionsType,
+      builder: (context, type, _) {
+        final Tool Function()? getTool = switch (type) {
+          ToolOptions.pen => () => _activeWritingPen,
+          _ => null,
+        };
+        if (getTool == null && type != ToolOptions.eraser) {
+          return const SizedBox.shrink();
+        }
+
+        final (
+          targetAnchor,
+          followerAnchor,
+          offset,
+        ) = switch (stows.editorToolbarAlignment.value) {
+          AxisDirection.down => (
+            Alignment.topLeft,
+            Alignment.bottomLeft,
+            const Offset(8, -6),
+          ),
+          AxisDirection.up => (
+            Alignment.bottomLeft,
+            Alignment.topLeft,
+            const Offset(8, 6),
+          ),
+          AxisDirection.left => (
+            Alignment.topRight,
+            Alignment.topLeft,
+            const Offset(6, 8),
+          ),
+          AxisDirection.right => (
+            Alignment.topLeft,
+            Alignment.topRight,
+            const Offset(-6, 8),
+          ),
+        };
         final width = min(
           PenModal.defaultWidth,
           MediaQuery.sizeOf(context).width - 16,
         );
-        final popover = _buildPopover(context, width);
-        if (popover == null) return const SizedBox.shrink();
-
-        final placement = _placement(context, width);
 
         return Align(
           alignment: Alignment.topLeft,
           child: CompositedTransformFollower(
-            link: placement.link,
+            link: _optionsLink,
             showWhenUnlinked: false,
-            targetAnchor: placement.target,
-            followerAnchor: placement.follower,
-            offset: placement.offset,
+            targetAnchor: targetAnchor,
+            followerAnchor: followerAnchor,
+            offset: offset,
             child: TapRegion(
               groupId: _optionsTapGroup,
               // Tapping the page closes the popover but still draws.
-              onTapOutside: (_) => _closePopovers(),
+              onTapOutside: (_) => toolOptionsType.value = ToolOptions.hide,
               child: Material(
                 type: MaterialType.transparency,
-                child: popover,
+                child: getTool == null
+                    ? EraserModal(width: width)
+                    : PenModal(
+                        getTool: getTool,
+                        setTool: widget.setTool,
+                        width: width,
+                      ),
               ),
             ),
           ),
@@ -598,15 +480,17 @@ class _ToolbarState extends State<Toolbar> {
     final alignment = stows.editorToolbarAlignment.value;
     final isToolbarVertical =
         alignment == AxisDirection.left || alignment == AxisDirection.right;
-    final dividerSide = BorderSide(
-      color: colorScheme.outlineVariant,
-    );
+    final dividerSide = BorderSide(color: colorScheme.outlineVariant);
 
     final buttonPadding = isToolbarVertical
         ? Toolbar._buttonPaddingVertical
         : Toolbar._buttonPaddingHorizontal;
 
-    final currentColor = _currentColorOf(widget.currentTool);
+    final currentColor = switch (widget.currentTool) {
+      final Pen pen => pen.color,
+      final Select select => select.getDominantStrokeColor(),
+      _ => null,
+    };
 
     if (widget.currentTool == Select.currentSelect) {
       // Enable selection bar only when selection is done
@@ -617,16 +501,15 @@ class _ToolbarState extends State<Toolbar> {
 
     // Every item that can appear in the toolbar. They are laid out below in
     // the order chosen in Settings > Customize toolbar ([ToolbarItem.visible]).
-    // Undo, redo and fullscreen live in the editor's top bar; export is in
-    // its 3-dot menu.
+    // Undo, redo, fullscreen and export live in the editor's top bar.
     final items = <ToolbarItem, List<Widget>>{
       ToolbarItem.pen: [
         ToolbarIconButton(
-          tooltip: Pen.currentPen.name,
-          selected: widget.currentTool == Pen.currentPen,
+          tooltip: _activeWritingPen.name,
+          selected: widget.currentTool is Pen,
           enabled: !widget.readOnly,
           onPressed: () {
-            if (widget.currentTool == Pen.currentPen) {
+            if (widget.currentTool is Pen) {
               if (toolOptionsType.value == .pen) {
                 toolOptionsType.value = .hide;
               } else {
@@ -634,61 +517,13 @@ class _ToolbarState extends State<Toolbar> {
               }
             } else {
               toolOptionsType.value = .hide;
-              widget.setTool(Pen.currentPen);
+              widget.setTool(_activeWritingPen);
             }
           },
           padding: buttonPadding,
-          child: _toolIcon(
-            _penSymbol(Pen.currentPen),
-            selected: widget.currentTool == Pen.currentPen,
-          ),
-        ),
-      ],
-      ToolbarItem.pencil: [
-        ToolbarIconButton(
-          tooltip: t.editor.pens.pencil,
-          selected: widget.currentTool == Pencil.currentPencil,
-          enabled: !widget.readOnly,
-          onPressed: () {
-            if (widget.currentTool == Pencil.currentPencil) {
-              if (toolOptionsType.value == .pencil) {
-                toolOptionsType.value = .hide;
-              } else {
-                toolOptionsType.value = .pencil;
-              }
-            } else {
-              toolOptionsType.value = .hide;
-              widget.setTool(Pencil.currentPencil);
-            }
-          },
-          padding: buttonPadding,
-          child: _toolIcon(
-            Symbols.edit,
-            selected: widget.currentTool == Pencil.currentPencil,
-          ),
-        ),
-      ],
-      ToolbarItem.highlighter: [
-        ToolbarIconButton(
-          tooltip: t.editor.pens.highlighter,
-          selected: widget.currentTool == Highlighter.currentHighlighter,
-          enabled: !widget.readOnly,
-          onPressed: () {
-            if (widget.currentTool == Highlighter.currentHighlighter) {
-              if (toolOptionsType.value == .highlighter) {
-                toolOptionsType.value = .hide;
-              } else {
-                toolOptionsType.value = .highlighter;
-              }
-            } else {
-              toolOptionsType.value = .hide;
-              widget.setTool(Highlighter.currentHighlighter);
-            }
-          },
-          padding: buttonPadding,
-          child: _toolIcon(
-            Symbols.ink_highlighter,
-            selected: widget.currentTool == Highlighter.currentHighlighter,
+          child: _symbol(
+            _penSymbol(_activeWritingPen),
+            widget.currentTool is Pen,
           ),
         ),
       ],
@@ -716,7 +551,7 @@ class _ToolbarState extends State<Toolbar> {
             );
           },
           child: currentColor == null
-              ? const Icon(Symbols.palette)
+              ? _symbol(Symbols.palette, false)
               : Container(
                   width: 18,
                   height: 18,
@@ -740,10 +575,7 @@ class _ToolbarState extends State<Toolbar> {
             widget.setTool(Select.currentSelect);
           },
           padding: buttonPadding,
-          child: _toolIcon(
-            Symbols.lasso_select,
-            selected: widget.currentTool is Select,
-          ),
+          child: _symbol(Symbols.lasso_select, widget.currentTool is Select),
         ),
       ],
       ToolbarItem.laserPointer: [
@@ -756,9 +588,9 @@ class _ToolbarState extends State<Toolbar> {
             widget.setTool(LaserPointer.currentLaserPointer);
           },
           padding: buttonPadding,
-          child: _toolIcon(
+          child: _symbol(
             Symbols.stylus_laser_pointer,
-            selected: widget.currentTool == LaserPointer.currentLaserPointer,
+            widget.currentTool == LaserPointer.currentLaserPointer,
           ),
         ),
       ],
@@ -767,22 +599,9 @@ class _ToolbarState extends State<Toolbar> {
           tooltip: t.editor.toolbar.toggleEraser,
           selected: widget.currentTool is Eraser,
           enabled: !widget.readOnly,
-          onPressed: () {
-            if (widget.currentTool is Eraser) {
-              // already using the eraser: open / close its options
-              toolOptionsType.value = toolOptionsType.value == .eraser
-                  ? .hide
-                  : .eraser;
-            } else {
-              toolOptionsType.value = .hide;
-              widget.setTool(Eraser());
-            }
-          },
+          onPressed: _onEraserPressed,
           padding: buttonPadding,
-          child: _toolIcon(
-            Symbols.ink_eraser,
-            selected: widget.currentTool is Eraser,
-          ),
+          child: _symbol(Symbols.ink_eraser, widget.currentTool is Eraser),
         ),
       ],
       ToolbarItem.photo: [
@@ -791,7 +610,7 @@ class _ToolbarState extends State<Toolbar> {
           enabled: !widget.readOnly,
           onPressed: widget.pickPhoto,
           padding: buttonPadding,
-          child: _toolIcon(Symbols.image),
+          child: _symbol(Symbols.image, false),
         ),
       ],
       ToolbarItem.text: [
@@ -801,7 +620,7 @@ class _ToolbarState extends State<Toolbar> {
           enabled: !widget.readOnly,
           onPressed: widget.toggleTextEditing,
           padding: buttonPadding,
-          child: _toolIcon(Symbols.text_fields, selected: widget.textEditing),
+          child: _symbol(Symbols.text_fields, widget.textEditing),
         ),
       ],
       ToolbarItem.fingerDrawing: [
@@ -815,7 +634,7 @@ class _ToolbarState extends State<Toolbar> {
                 enabled: !widget.readOnly,
                 onPressed: widget.toggleFingerDrawing,
                 padding: buttonPadding,
-                child: _toolIcon(Symbols.touch_app, selected: value),
+                child: _symbol(Symbols.touch_app, value),
               );
             },
           ),
@@ -823,17 +642,6 @@ class _ToolbarState extends State<Toolbar> {
       // There is no preset-stroke-width button in the toolbar (yet).
       ToolbarItem.quickWidths: const [],
     };
-
-    // The buttons that open a popover mark where it should appear.
-    for (final (item, anchor) in [
-      (ToolbarItem.pen, _Anchor.pen),
-      (ToolbarItem.pencil, _Anchor.pencil),
-      (ToolbarItem.highlighter, _Anchor.highlighter),
-      (ToolbarItem.eraser, _Anchor.eraser),
-      (ToolbarItem.colorPalette, _Anchor.colors),
-    ]) {
-      items[item] = [for (final w in items[item]!) _anchored(anchor, w)];
-    }
 
     final bars = <Widget>[
       ValueListenableBuilder(
@@ -864,13 +672,36 @@ class _ToolbarState extends State<Toolbar> {
                 ? CollapsibleAxis.horizontal
                 : CollapsibleAxis.vertical,
             maintainState: true,
-            // The lasso selection menu is a popup next to the selection
-            // (see SelectionPopup), and pen, highlighter, pencil and eraser
-            // options are in the overlay, so there's nothing to show here.
-            collapsed: true,
-            child: const SizedBox.square(dimension: SizePicker.smallLength),
+            collapsed: toolOptionsType != ToolOptions.select,
+            child: switch (toolOptionsType) {
+              .select => SelectionBar(
+                duplicateSelection: widget.duplicateSelection,
+                deleteSelection: widget.deleteSelection,
+              ),
+              // pen, highlighter and pencil options are in the overlay
+              _ => const SizedBox.square(dimension: SizePicker.smallLength),
+            },
           );
         },
+      ),
+      ValueListenableBuilder(
+        valueListenable: showColorOptions,
+        builder: (context, showColorOptions, child) {
+          return Collapsible(
+            axis: isToolbarVertical
+                ? CollapsibleAxis.horizontal
+                : CollapsibleAxis.vertical,
+            maintainState: true,
+            collapsed: !showColorOptions,
+            child: child!,
+          );
+        },
+        child: ColorBar(
+          axis: isToolbarVertical ? Axis.vertical : Axis.horizontal,
+          setColor: widget.setColor,
+          currentColor: currentColor,
+          invert: invert,
+        ),
       ),
       ValueListenableBuilder(
         valueListenable: widget.quillFocus,
@@ -928,13 +759,15 @@ class _ToolbarState extends State<Toolbar> {
           link: _optionsLink,
           child: TapRegion(
             groupId: _optionsTapGroup,
-            child: Container(
+            // A Material ancestor so button ink shows over the bar's colour.
+            child: Material(
+              color: colorScheme.surfaceContainer,
+              child: Container(
               // Edge-to-edge bar: spans the whole side of the screen.
               width: isToolbarVertical ? null : double.infinity,
               height: isToolbarVertical ? double.infinity : null,
               padding: const .symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: colorScheme.surfaceContainer,
                 border: switch (alignment) {
                   AxisDirection.up => Border(bottom: dividerSide),
                   AxisDirection.down => Border(top: dividerSide),
@@ -952,6 +785,7 @@ class _ToolbarState extends State<Toolbar> {
                   for (final item in ToolbarItem.visible) ...?items[item],
                 ],
               ),
+            ),
             ),
           ),
         ),
@@ -977,7 +811,6 @@ class _ToolbarState extends State<Toolbar> {
   @override
   void dispose() {
     toolOptionsType.removeListener(_onToolOptionsTypeChanged);
-    showColorOptions.removeListener(_onShowColorOptionsChanged);
     DynamicMaterialApp.removeFullscreenListener(_setState);
     DynamicMaterialApp.setFullscreen(false, updateSystem: true);
 
@@ -986,7 +819,4 @@ class _ToolbarState extends State<Toolbar> {
   }
 }
 
-/// The toolbar buttons a popover can open from.
-enum _Anchor { pen, pencil, highlighter, eraser, colors }
-
-enum ToolOptions { hide, pen, highlighter, pencil, eraser, select }
+enum ToolOptions { hide, pen, eraser, select }

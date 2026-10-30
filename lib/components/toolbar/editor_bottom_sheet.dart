@@ -18,6 +18,8 @@ class EditorBottomSheet extends StatefulWidget {
   const new({
     super.key,
     required this.invert,
+    required this.canExport,
+    required this.openExport,
     required this.coreInfo,
     required this.currentPageIndex,
     required this.setBackgroundPattern,
@@ -33,10 +35,15 @@ class EditorBottomSheet extends StatefulWidget {
     required this.canRasterPdf,
     required this.getIsWatchingServer,
     required this.setIsWatchingServer,
-    required this.showExportOptions,
   });
 
   final bool invert;
+
+  /// Whether the note can be exported (not while read-only).
+  final bool canExport;
+
+  /// Closes this sheet's caller and opens the toolbar's export options.
+  final VoidCallback openExport;
   final EditorCoreInfo coreInfo;
   final int? currentPageIndex;
   final void Function(CanvasBackgroundPattern) setBackgroundPattern;
@@ -52,9 +59,6 @@ class EditorBottomSheet extends StatefulWidget {
   final bool canRasterPdf;
   final bool Function() getIsWatchingServer;
   final void Function(bool) setIsWatchingServer;
-
-  /// Opens the export bar (SBA / PDF / PNG) in the toolbar.
-  final VoidCallback showExportOptions;
 
   @override
   State<EditorBottomSheet> createState() => _EditorBottomSheetState();
@@ -90,19 +94,15 @@ class _EditorBottomSheetState extends State<EditorBottomSheet> {
             shrinkWrap: true,
             children: [
               const SizedBox(height: 8),
-              // Transparent Material so the ripple paints above the panel color.
-              Material(
-                type: MaterialType.transparency,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.share),
-                  title: Text(t.editor.toolbar.export),
-                  enabled: !widget.coreInfo.readOnly,
-                  onTap: () {
-                    Navigator.pop(context);
-                    widget.showExportOptions();
-                  },
-                ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.ios_share),
+                title: const Text('Export / Share'),
+                enabled: widget.canExport,
+                onTap: () {
+                  widget.openExport();
+                  Navigator.pop(context);
+                },
               ),
               const SizedBox(height: 8),
               Wrap(

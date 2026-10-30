@@ -16,7 +16,6 @@ import 'package:flutter/foundation.dart' show clampDouble;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:vector_math/vector_math_64.dart' show Matrix4, Quad, Vector3;
 
@@ -724,7 +723,6 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
   // Handle the start of a gesture. All of pan, scale, and rotate are handled
   // with GestureDetector's scale gesture.
   void _onScaleStart(ScaleStartDetails details) {
-    _stopWheelScroll();
     if (_controller.isAnimating) {
       _controller.stop();
       _controller.reset();
@@ -879,40 +877,24 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
           translationVector.x,
           translationVector.y,
         );
-        // Pan flicks use their own, stronger friction than the scale fling
-        // so they settle quickly, and a single flick is capped to about one
-        // screen of travel so you can stop on the page you're aiming for.
-        const double panDrag = _panFlingDrag;
-        var flingVelocity = details.velocity.pixelsPerSecond;
-        final double maxTravel =
-            (context.size?.height ?? 800) * _maxFlingScreens;
-        final double travel = flingVelocity.distance / -math.log(panDrag);
-        if (travel > maxTravel) {
-          flingVelocity = flingVelocity * (maxTravel / travel);
-        }
-
         final FrictionSimulation frictionSimulationX = FrictionSimulation(
-          panDrag,
+          widget.interactionEndFrictionCoefficient,
           translation.dx,
-          flingVelocity.dx,
+          details.velocity.pixelsPerSecond.dx,
         );
         final FrictionSimulation frictionSimulationY = FrictionSimulation(
-          panDrag,
+          widget.interactionEndFrictionCoefficient,
           translation.dy,
-          flingVelocity.dy,
+          details.velocity.pixelsPerSecond.dy,
         );
-        // Sample the friction simulations directly. (The previous approach
-        // squeezed the whole slide into a shorter duration and then applied
-        // Curves.decelerate on top, which made flings stop abruptly.)
-        final double tFinal = _getFlingDuration(
-          flingVelocity.distance,
-          panDrag,
+        final double tFinal = _getFinalTime(
+          details.velocity.pixelsPerSecond.distance,
+          widget.interactionEndFrictionCoefficient,
         );
-        _animation = _FrictionOffsetTween(
-          simX: frictionSimulationX,
-          simY: frictionSimulationY,
-          seconds: tFinal,
-        ).animate(_controller);
+        _animation = Tween<Offset>(
+          begin: translation,
+          end: Offset(frictionSimulationX.finalX, frictionSimulationY.finalX),
+        ).chain(CurveTween(curve: Curves.decelerate)).animate(_controller);
         _controller.duration = Duration(milliseconds: (tFinal * 1000).round());
         _animation!.addListener(_handleInertiaAnimation);
         _controller.forward();
@@ -963,20 +945,16 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
           transform: event.transform,
         );
 
-        // Don't apply the wheel step instantly; queue it and let a ticker
-        // ease towards it so scrolling glides instead of jumping.
-        if (_controller.isAnimating) {
-          _controller.stop();
-          _controller.reset();
-          _animation?.removeListener(_handleInertiaAnimation);
-          _animation = null;
-        }
-        _wheelRemaining += localDelta;
-        _wheelLastTick = null;
-        if (!(_wheelTicker?.isActive ?? false)) {
-          _wheelTicker ??= createTicker(_onWheelTick);
-          _wheelTicker!.start();
-        }
+        final Offset focalPointScene = _transformer.toScene(local);
+
+        final Offset newFocalPointScene = _transformer.toScene(
+          local - localDelta,
+        );
+
+        _transformer.value = _matrixTranslate(
+          _transformer.value,
+          newFocalPointScene - focalPointScene,
+        );
 
         return;
       }
@@ -1004,59 +982,6 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
       _transformer.value,
       focalPointSceneScaled - focalPointScene,
     );
-  }
-
-  /// Friction for pan flicks: velocity is multiplied by this each second.
-  /// Lower = stops sooner. A fling travels about velocity / -ln(drag) pixels.
-  static const double _panFlingDrag = 0.02;
-
-  /// A single flick never travels further than this many screen heights.
-  static const double _maxFlingScreens = 1.0;
-
-  /// Distance (in screen pixels) still to be scrolled from mouse wheel input.
-  Offset _wheelRemaining = Offset.zero;
-  Ticker? _wheelTicker;
-  Duration? _wheelLastTick;
-
-  /// Higher = snappier wheel scrolling, lower = floatier.
-  static const double _wheelEaseRate = 16;
-
-  void _onWheelTick(Duration elapsed) {
-    final last = _wheelLastTick;
-    _wheelLastTick = elapsed;
-    // First tick after new input: assume one 60Hz frame.
-    final double dt = last == null
-        ? 1 / 60
-        : ((elapsed - last).inMicroseconds / 1e6).clamp(0.0, 0.05);
-
-    final double fraction = 1 - math.exp(-_wheelEaseRate * dt);
-    Offset step = _wheelRemaining * fraction;
-    if (step.distance < 0.5 || _wheelRemaining.distance < 1) {
-      step = _wheelRemaining;
-    }
-    _wheelRemaining -= step;
-
-    if (step != Offset.zero) {
-      final Offset focalPointScene = _transformer.toScene(Offset.zero);
-      final Offset newFocalPointScene = _transformer.toScene(
-        Offset.zero - step,
-      );
-      _transformer.value = _matrixTranslate(
-        _transformer.value,
-        newFocalPointScene - focalPointScene,
-      );
-    }
-
-    if (_wheelRemaining == Offset.zero) {
-      _wheelTicker?.stop();
-      _wheelLastTick = null;
-    }
-  }
-
-  void _stopWheelScroll() {
-    _wheelRemaining = Offset.zero;
-    _wheelLastTick = null;
-    _wheelTicker?.stop();
   }
 
   // Handle inertia drag animation.
@@ -1142,7 +1067,6 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
 
   @override
   void dispose() {
-    _wheelTicker?.dispose();
     _controller.dispose();
     _scaleController.dispose();
     _transformer.removeListener(_handleTransformation);
@@ -1257,36 +1181,6 @@ double _getFinalTime(
   double effectivelyMotionless = 10,
 }) {
   return math.log(effectivelyMotionless / velocity) / math.log(drag / 100);
-}
-
-/// Time (seconds) for a [FrictionSimulation] with the given [drag] starting at
-/// [velocity] to slow to an imperceptible crawl.
-double _getFlingDuration(
-  double velocity,
-  double drag, {
-  double effectivelyMotionless = 10,
-}) {
-  if (velocity <= effectivelyMotionless) return 0.01;
-  return math.log(effectivelyMotionless / velocity) / math.log(drag);
-}
-
-/// Maps animation progress 0..1 onto real time of two friction simulations.
-class _FrictionOffsetTween extends Animatable<Offset> {
-  _FrictionOffsetTween({
-    required this.simX,
-    required this.simY,
-    required this.seconds,
-  });
-
-  final FrictionSimulation simX;
-  final FrictionSimulation simY;
-  final double seconds;
-
-  @override
-  Offset transform(double t) {
-    final time = t * seconds;
-    return Offset(simX.x(time), simY.x(time));
-  }
 }
 
 // Return the translation from the given Matrix4 as an .

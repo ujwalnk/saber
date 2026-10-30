@@ -1267,15 +1267,6 @@ class Translations$editor$selectionBar$en {
 
 	/// en: 'Duplicate'
 	String get duplicate => 'Duplicate';
-
-	/// en: 'Copy'
-	String get copy => 'Copy';
-
-	/// en: 'Copied to clipboard'
-	String get copied => 'Copied to clipboard';
-
-	/// en: 'Couldn't copy selection'
-	String get copyFailed => 'Couldn\'t copy selection';
 }
 
 // Path: editor.menu

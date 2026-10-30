@@ -1,19 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:saber/components/toolbar/nib_settings_panel.dart';
 import 'package:saber/components/toolbar/samsung_panel.dart';
 import 'package:saber/components/toolbar/size_picker.dart';
-import 'package:saber/data/prefs.dart';
+import 'package:saber/components/toolbar/writing_tool.dart';
 import 'package:saber/data/tools/_tool.dart';
-import 'package:saber/data/tools/highlighter.dart';
 import 'package:saber/data/tools/pen.dart';
-import 'package:saber/data/tools/pencil.dart';
 import 'package:saber/data/tools/shape_pen.dart';
 import 'package:saber/i18n/strings.g.dart';
 import 'package:sbn/tool_id.dart';
 
-/// Compact options popover for the pen, highlighter and pencil.
+/// Compact options popover for all writing tools (ink pen, ballpoint,
+/// pencil, marker, highlighter).
 ///
 /// It is shown by the toolbar as a small overlay attached to the toolbar
 /// (see `Toolbar`), and has a fixed [width] so it stays neat.
@@ -30,6 +28,9 @@ class PenModal extends StatefulWidget {
   final double width;
 
   static const double defaultWidth = 336;
+
+  /// Height of the tool strip above the divider.
+  static const double _stripHeight = 72;
 
   @override
   State<PenModal> createState() => _PenModalState();
@@ -50,9 +51,10 @@ class _PenModalState extends State<PenModal> {
     }
 
     final colorScheme = ColorScheme.of(context);
-    final isRegularPen = currentPen is! Highlighter && currentPen is! Pencil;
+    final selected = WritingTool.of(currentPen);
+    final isShapePen = currentPen is ShapePen;
     final showNibSettings =
-        isRegularPen && currentPen.toolId == ToolId.fountainPen;
+        selected == WritingTool.inkPen && currentPen.toolId == ToolId.fountainPen;
 
     return SizedBox(
       width: widget.width,
@@ -63,85 +65,31 @@ class _PenModalState extends State<PenModal> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (isRegularPen)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            SizedBox(
+              height: PenModal._stripHeight,
+              child: Row(
                 children: [
-                  _penTypeButton(
-                    context: context,
-                    isSelected: Pen.currentPen.icon == Pen.fountainPenIcon,
-                    onPressed: () => setState(() {
-                      widget.setTool(Pen.fountainPen());
-                    }),
-                    tooltip: t.editor.pens.fountainPen,
-                    icon: SvgPicture.asset(
-                      'assets/images/scribble_fountain.svg',
-                      width: 26,
-                      height: 26 / 508 * 374,
-                      theme: SvgTheme(
-                        currentColor: Pen.currentPen.icon == Pen.fountainPenIcon
-                            ? colorScheme.secondary
-                            : colorScheme.onSurface,
+                  for (final tool in WritingTool.values)
+                    Expanded(
+                      child: _ToolSlot(
+                        tool: tool,
+                        selected: tool == selected,
+                        onPressed: () => setState(() {
+                          if (tool != selected) widget.setTool(tool.instance);
+                        }),
                       ),
                     ),
-                  ),
-                  _penTypeButton(
-                    context: context,
-                    isSelected: Pen.currentPen.icon == Pen.ballpointPenIcon,
-                    onPressed: () => setState(() {
-                      widget.setTool(Pen.ballpointPen());
-                    }),
-                    tooltip: t.editor.pens.ballpointPen,
-                    icon: SvgPicture.asset(
-                      'assets/images/scribble_ballpoint.svg',
-                      width: 26,
-                      height: 26 / 508 * 374,
-                      theme: SvgTheme(
-                        currentColor:
-                            Pen.currentPen.icon == Pen.ballpointPenIcon
-                            ? colorScheme.secondary
-                            : colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                  _penTypeButton(
-                    context: context,
-                    isSelected: Pen.currentPen.icon == ShapePen.shapePenIcon,
-                    onPressed: () => setState(() {
-                      widget.setTool(ShapePen());
-                    }),
-                    tooltip: t.editor.pens.shapePen,
-                    icon: FaIcon(
-                      ShapePen.shapePenIcon,
-                      size: 18,
-                      color: Pen.currentPen.icon == ShapePen.shapePenIcon
-                          ? colorScheme.secondary
-                          : colorScheme.onSurface,
-                    ),
-                  ),
                 ],
-              )
-            else
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  currentPen.name,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
               ),
+            ),
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: colorScheme.outlineVariant,
+            ),
+            const SizedBox(height: 4),
+            _shapePenToggle(colorScheme, isShapePen),
             SizePicker(axis: Axis.horizontal, pen: currentPen),
-            if (currentPen is Highlighter)
-              SwitchListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: const Text(
-                  'Straighten highlighter',
-                  style: TextStyle(fontSize: 13),
-                ),
-                value: stows.straightenHighlighter.value,
-                onChanged: (value) =>
-                    setState(() => stows.straightenHighlighter.value = value),
-              ),
             if (showNibSettings) ...[
               InkWell(
                 borderRadius: BorderRadius.circular(8),
@@ -172,35 +120,103 @@ class _PenModalState extends State<PenModal> {
     );
   }
 
-  /// Samsung Notes-style pen type button: 44x44, 10px radius,
-  /// 2px orange ring when selected.
-  Widget _penTypeButton({
-    required BuildContext context,
-    required bool isSelected,
-    required VoidCallback onPressed,
-    required String tooltip,
-    required Widget icon,
-  }) {
+  /// The shape pen isn't one of the five tools above, so it stays
+  /// reachable as a toggle in the settings area.
+  Widget _shapePenToggle(ColorScheme colorScheme, bool isShapePen) {
     const orange = Color(0xFFFF6B35);
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onPressed,
-        child: Container(
-          width: 52,
-          height: 44,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            color: isSelected
-                ? orange.withValues(alpha: 0.15)
-                : Colors.transparent,
-            border: Border.all(
-              color: isSelected ? orange : Colors.transparent,
-              width: 2,
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Tooltip(
+        message: t.editor.pens.shapePen,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => setState(() {
+            widget.setTool(isShapePen ? WritingTool.inkPen.instance : ShapePen());
+          }),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: isShapePen
+                  ? orange.withValues(alpha: 0.15)
+                  : Colors.transparent,
+              border: Border.all(
+                color: isShapePen ? orange : Colors.transparent,
+                width: 2,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FaIcon(
+                  ShapePen.shapePenIcon,
+                  size: 14,
+                  color: isShapePen
+                      ? colorScheme.secondary
+                      : colorScheme.onSurface,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  t.editor.pens.shapePen,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
             ),
           ),
-          child: icon,
+        ),
+      ),
+    );
+  }
+}
+
+/// One tool in the strip. The artwork is much taller than the strip and is
+/// anchored to its top, so the strip's bottom edge (the divider) clips it.
+/// Selecting a tool slides it up, so more of it shows above the others.
+class _ToolSlot extends StatelessWidget {
+  const _ToolSlot({
+    required this.tool,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final WritingTool tool;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  static const double _baseWidth = 30;
+  static const double _restingTop = 24;
+  static const double _liftedTop = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tool.label,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onPressed,
+        child: ClipRect(
+          child: Stack(
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeOutCubic,
+                top: selected ? _liftedTop : _restingTop,
+                left: 0,
+                right: 0,
+                height: 400,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Image.asset(
+                    tool.asset,
+                    width: _baseWidth * tool.widthFactor,
+                    fit: BoxFit.fitWidth,
+                    alignment: Alignment.topCenter,
+                    filterQuality: FilterQuality.medium,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -330,9 +330,6 @@ editor:
   selectionBar:
     delete: Delete
     duplicate: Duplicate
-    copy: Copy
-    copied: Copied to clipboard
-    copyFailed: Couldn't copy selection
   menu:
     clearPage: Clear page $page/$totalPages
     clearAllPages: Clear all pages

@@ -1,22 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:saber/components/toolbar/pen_modal.dart';
 import 'package:saber/components/toolbar/samsung_panel.dart';
 import 'package:saber/components/toolbar/step_slider.dart';
 import 'package:saber/data/prefs.dart';
+import 'package:saber/data/tools/eraser.dart';
+import 'package:saber/i18n/strings.g.dart';
 
-/// Compact options popover for the eraser: its size, and whether it should
-/// only erase highlighter strokes.
+/// Compact options popover for the eraser: just its size.
 ///
-/// Shown by the toolbar as a small overlay, like [PenModal]. Both settings
-/// are stored in [stows] and apply to the eraser immediately.
+/// Shown by the toolbar the same way as [PenModal].
 class EraserModal extends StatefulWidget {
-  const new({super.key, this.width = PenModal.defaultWidth});
+  const new({super.key, this.width = defaultWidth});
 
   final double width;
 
-  static const double sizeMin = 5;
-  static const double sizeMax = 60;
-  static const double sizeStep = 5;
+  static const double defaultWidth = 336;
 
   @override
   State<EraserModal> createState() => _EraserModalState();
@@ -31,57 +28,33 @@ class _EraserModalState extends State<EraserModal> {
     return SizedBox(
       width: widget.width,
       child: SamsungPanel(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         borderRadius: 16,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Row(
           children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
-              child: Text(
-                'Eraser',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            Row(
+            Column(
               children: [
-                Column(
-                  children: [
-                    Text(
-                      'Size',
-                      style: TextStyle(
-                        color: colorScheme.onSurface.withValues(alpha: 0.8),
-                        fontSize: 10,
-                        height: 1,
-                      ),
-                    ),
-                    Text(size.round().toString()),
-                  ],
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: StepSlider(
-                    value: size,
-                    min: EraserModal.sizeMin,
-                    max: EraserModal.sizeMax,
-                    step: EraserModal.sizeStep,
-                    onChanged: (value) =>
-                        setState(() => stows.eraserSize.value = value),
+                Text(
+                  t.editor.penOptions.size,
+                  style: TextStyle(
+                    color: colorScheme.onSurface.withValues(alpha: 0.8),
+                    fontSize: 10,
+                    height: 1,
                   ),
                 ),
+                Text(size.round().toString()),
               ],
             ),
-            SwitchListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Only erase highlighter',
-                style: TextStyle(fontSize: 13),
+            const SizedBox(width: 8),
+            Expanded(
+              child: StepSlider(
+                value: size,
+                min: Eraser.sizeMin,
+                max: Eraser.sizeMax,
+                step: Eraser.sizeStep,
+                onChanged: (value) =>
+                    setState(() => stows.eraserSize.value = value),
               ),
-              value: stows.eraseHighlighterOnly.value,
-              onChanged: (value) =>
-                  setState(() => stows.eraseHighlighterOnly.value = value),
             ),
           ],
         ),

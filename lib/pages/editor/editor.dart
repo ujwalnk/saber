@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' as ui;
+import 'dart:math' show max;
 
 import 'package:collapsible/collapsible.dart';
 import 'package:file_picker/file_picker.dart';
@@ -20,8 +20,8 @@ import 'package:saber/components/canvas/_asset_cache.dart';
 import 'package:saber/components/canvas/_stroke.dart';
 import 'package:saber/components/canvas/canvas.dart';
 import 'package:saber/components/canvas/canvas_gesture_detector.dart';
-import 'package:saber/components/canvas/eraser_cursor.dart';
 import 'package:saber/components/canvas/canvas_image.dart';
+import 'package:saber/components/canvas/eraser_cursor_painter.dart';
 import 'package:saber/components/canvas/image/editor_image.dart';
 import 'package:saber/components/canvas/save_indicator.dart';
 import 'package:saber/components/editor/read_only_banner.dart';
@@ -32,7 +32,6 @@ import 'package:saber/components/theming/saber_theme.dart';
 import 'package:saber/components/toolbar/color_bar.dart';
 import 'package:saber/components/toolbar/editor_bottom_sheet.dart';
 import 'package:saber/components/toolbar/editor_page_manager.dart';
-import 'package:saber/components/toolbar/selection_popup.dart';
 import 'package:saber/components/toolbar/toolbar.dart';
 import 'package:saber/data/editor/editor_core_info.dart';
 import 'package:saber/data/editor/editor_exporter.dart';
@@ -46,6 +45,7 @@ import 'package:saber/data/prefs.dart';
 import 'package:saber/data/tools/_tool.dart';
 import 'package:saber/data/tools/eraser.dart';
 import 'package:saber/data/tools/highlighter.dart';
+import 'package:saber/data/tools/marker.dart';
 import 'package:saber/data/tools/laser_pointer.dart';
 import 'package:saber/data/tools/pen.dart';
 import 'package:saber/data/tools/pencil.dart';
@@ -161,6 +161,7 @@ class EditorState extends State<Editor> {
   set currentTool(Tool tool) {
     _currentTool = tool;
     if (tool is! Eraser) _lastNonEraserTool = tool;
+    _eraserCircle.value = null;
     stows.lastTool.value = tool.toolId;
   }
 
@@ -181,6 +182,51 @@ class EditorState extends State<Editor> {
   /// The last non-Eraser [currentTool] value.
   late Tool _lastNonEraserTool = Pen.currentPen;
 
+  /// Where the eraser circle is drawn, in the canvas area's coordinates,
+  /// and its radius on screen. Null when the circle is hidden.
+  final ValueNotifier<({Offset center, double radius})?> _eraserCircle =
+      ValueNotifier(null);
+
+  /// How many screen pixels one page unit takes up at [globalPosition].
+  double? _pageUnitOnScreen(Offset globalPosition) {
+    final index = onWhichPageIsFocalPoint(globalPosition);
+    final candidates = [
+      if (index != null) coreInfo.pages[index],
+      ...coreInfo.pages,
+    ];
+    for (final page in candidates) {
+      final box = page.renderBox;
+      if (box == null || !box.attached || !box.hasSize) continue;
+      final origin = box.localToGlobal(Offset.zero);
+      final unit = box.localToGlobal(const Offset(1, 0));
+      return (unit - origin).distance;
+    }
+    return null;
+  }
+
+  void _updateEraserCircle(PointerEvent event) {
+    final tool = currentTool;
+    if (tool is! Eraser) {
+      _eraserCircle.value = null;
+      return;
+    }
+    final unit = _pageUnitOnScreen(event.position);
+    if (unit == null) {
+      _eraserCircle.value = null;
+      return;
+    }
+    _eraserCircle.value = (
+      center: event.localPosition,
+      radius: max(tool.size * unit, 2.0),
+    );
+  }
+
+  /// Touch has no hover, so the circle goes away when the finger lifts.
+  /// Mouse and stylus keep it where they are.
+  void _onEraserPointerUp(PointerEvent event) {
+    if (event.kind == PointerDeviceKind.touch) _eraserCircle.value = null;
+  }
+
   /// If the stylus button is pressed, or was pressed, during the current draw gesture.
   ///
   /// For now, this also includes when an [PointerDeviceKind.inverseStylus] is
@@ -191,7 +237,6 @@ class EditorState extends State<Editor> {
   @override
   void initState() {
     DynamicMaterialApp.addFullscreenListener(_setState);
-    _transformationController.addListener(_onTransformationChangedForPopup);
 
     _initAsync();
     _assignKeybindings();
@@ -662,20 +707,14 @@ class EditorState extends State<Editor> {
         if (newStroke.isEmpty) return;
 
         if (currentTool is! ShapePen) {
-          final alwaysStraighten =
-              newStroke.toolId == .highlighter &&
-              (stows.straightenHighlighter.value ||
-                  stows.autoStraightenHighlighterOnly.value);
-          if (alwaysStraighten) {
-            // Highlighter strokes are straightened whatever their length or
-            // shape.
-            if (newStroke.points.length >= 2 &&
+          if (stows.autoStraightenHighlighterOnly.value) {
+            // Highlighter strokes are always straightened, whatever their
+            // length or shape. Pens and pencil are left exactly as drawn.
+            if (newStroke.toolId == .highlighter &&
+                newStroke.points.length >= 2 &&
                 newStroke.points.first != newStroke.points.last) {
               newStroke.convertToLine();
             }
-          } else if (stows.autoStraightenHighlighterOnly.value) {
-            // Only highlighter lines are straightened: pens and pencil are
-            // left exactly as drawn.
           } else if (stows.autoStraightenLines.value &&
               newStroke.isStraightLine()) {
             newStroke.convertToLine();
@@ -761,49 +800,6 @@ class EditorState extends State<Editor> {
   void updatePointerData(PointerDeviceKind kind, double? pressure) {
     currentPointerKind = kind;
     currentPressure = pressure;
-  }
-
-  /// Where the pointer is, for the circle that shows the eraser's reach.
-  final ValueNotifier<EraserPointer?> _eraserPointer = ValueNotifier(null);
-
-  void _trackEraserPointer(PointerEvent event) {
-    if (currentTool is! Eraser) {
-      if (_eraserPointer.value != null) _eraserPointer.value = null;
-      return;
-    }
-    _eraserPointer.value = (local: event.localPosition, global: event.position);
-  }
-
-  void _pointerLeftCanvas(PointerEvent event) {
-    // A mouse or stylus keeps hovering after it lifts; a finger doesn't.
-    if (event.kind == PointerDeviceKind.touch) _eraserPointer.value = null;
-  }
-
-  /// The eraser's radius in screen pixels at [global]. The eraser's size is in
-  /// page units, so this depends on zoom and on how the page is fitted.
-  double? _eraserRadiusOnScreen(Offset global) {
-    final tool = currentTool;
-    if (tool is! Eraser) return null;
-
-    EditorPage? page;
-    final index = onWhichPageIsFocalPoint(global);
-    if (index != null) {
-      page = coreInfo.pages[index];
-    } else {
-      for (final candidate in coreInfo.pages) {
-        if (candidate.renderBox != null) {
-          page = candidate;
-          break;
-        }
-      }
-    }
-    final box = page?.renderBox;
-    if (box == null || !box.attached) return null;
-
-    final transform = box.getTransformTo(null);
-    final origin = MatrixUtils.transformPoint(transform, Offset.zero);
-    final unitX = MatrixUtils.transformPoint(transform, const Offset(1, 0));
-    return tool.size * (unitX - origin).distance;
   }
 
   void onHovering() {
@@ -1429,247 +1425,6 @@ class EditorState extends State<Editor> {
     }
   }
 
-  void duplicateSelection() {
-    final select = currentTool as Select;
-    if (!select.doneSelecting) return;
-
-    setState(() {
-      final page = coreInfo.pages[select.selectResult.pageIndex];
-      final strokes = select.selectResult.strokes;
-      final images = select.selectResult.images;
-
-      const duplicationFeedbackOffset = Offset(25, -25);
-
-      final duplicatedStrokes = strokes.map((stroke) {
-        return stroke.copy()..shift(duplicationFeedbackOffset);
-      }).toList();
-
-      final duplicatedImages = images.map((image) {
-        return image.copy()
-          ..id = coreInfo.nextImageId++
-          ..dstRect.shift(duplicationFeedbackOffset);
-      }).toList();
-
-      page.strokes.addAll(duplicatedStrokes);
-      page.images.addAll(duplicatedImages);
-
-      select.selectResult = select.selectResult.copyWith(
-        strokes: duplicatedStrokes,
-        images: duplicatedImages,
-        path: select.selectResult.path.shift(
-          duplicationFeedbackOffset,
-        ),
-      );
-
-      history.recordChange(
-        EditorHistoryItem(
-          type: .draw,
-          pageIndex: select.selectResult.pageIndex,
-          strokes: duplicatedStrokes,
-          images: duplicatedImages,
-        ),
-      );
-      autosaveAfterDelay();
-    });
-
-  }
-
-  void deleteSelection() {
-    final select = currentTool as Select;
-    if (!select.doneSelecting) {
-      return;
-    }
-
-    setState(() {
-      final page = coreInfo.pages[select.selectResult.pageIndex];
-      final strokes = select.selectResult.strokes;
-      final images = select.selectResult.images;
-
-      for (final stroke in strokes) {
-        page.strokes.remove(stroke);
-      }
-      for (final image in images) {
-        page.images.remove(image);
-      }
-
-      select.unselect();
-
-      history.recordChange(
-        EditorHistoryItem(
-          type: .erase,
-          pageIndex: strokes.first.pageIndex,
-          strokes: strokes,
-          images: images,
-        ),
-      );
-      autosaveAfterDelay();
-    });
-  }
-
-  /// Copies the lasso selection to the clipboard as a (transparent) PNG,
-  /// cropped to the selected strokes and images.
-  Future<void> copySelection() async {
-    final select = currentTool;
-    if (select is! Select || !select.doneSelecting) return;
-    final result = select.selectResult;
-    if (result.isEmpty) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    final clipboard = SystemClipboard.instance;
-    if (clipboard == null) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(t.editor.selectionBar.copyFailed)),
-      );
-      return;
-    }
-
-    // Snapshot, since the selection can change while we render.
-    final strokes = result.strokes.toList();
-    final images = result.images.toList();
-    final pageSize = coreInfo.pages[result.pageIndex].size;
-
-    Rect? bounds;
-    for (final stroke in strokes) {
-      final box = stroke.boundingBox.inflate(stroke.options.size);
-      bounds = bounds == null ? box : bounds.expandToInclude(box);
-    }
-    for (final image in images) {
-      bounds = bounds == null
-          ? image.dstRect
-          : bounds.expandToInclude(image.dstRect);
-    }
-    if (bounds == null) return;
-    bounds = bounds.inflate(8).intersect(Offset.zero & pageSize);
-    if (bounds.isEmpty) return;
-
-    ui.Image? fullPage;
-    ui.Image? cropped;
-    try {
-      // Render only the selected items on an otherwise empty page, with no
-      // background, so the pasted image is just what was selected.
-      final tempPage = EditorPage(
-        size: pageSize,
-        strokes: strokes,
-        images: images,
-      );
-      final tempCoreInfo = coreInfo.copyWith(
-        backgroundColor: Colors.transparent,
-        backgroundPattern: .none,
-        pages: [tempPage],
-      );
-
-      const maxRasterizableSize = 3000.0;
-      final pixelRatio = (maxRasterizableSize / pageSize.longestSide)
-          .clamp(0.5, 2.0)
-          .toDouble();
-
-      fullPage = await EditorExporter.screenshotPage(
-        coreInfo: tempCoreInfo,
-        pageIndex: 0,
-        rasterizeAllStrokes: true,
-        pixelRatio: pixelRatio,
-      );
-
-      final src = Rect.fromLTRB(
-        bounds.left * pixelRatio,
-        bounds.top * pixelRatio,
-        bounds.right * pixelRatio,
-        bounds.bottom * pixelRatio,
-      );
-      final recorder = ui.PictureRecorder();
-      final canvas = ui.Canvas(recorder);
-      final dst = Offset.zero & src.size;
-      canvas.drawImageRect(fullPage, src, dst, Paint());
-      final picture = recorder.endRecording();
-      cropped = await picture.toImage(
-        dst.width.ceil().clamp(1, 1 << 14).toInt(),
-        dst.height.ceil().clamp(1, 1 << 14).toInt(),
-      );
-      picture.dispose();
-
-      final byteData = await cropped.toByteData(format: .png);
-      if (byteData == null) throw StateError('Could not encode selection');
-
-      final item = DataWriterItem();
-      item.add(Formats.png(byteData.buffer.asUint8List()));
-      await clipboard.write([item]);
-
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text(t.editor.selectionBar.copied)),
-      );
-    } catch (e, st) {
-      log.severe('Failed to copy selection', e, st);
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text(t.editor.selectionBar.copyFailed)),
-      );
-    } finally {
-      fullPage?.dispose();
-      cropped?.dispose();
-    }
-  }
-
-  // --- floating menu for the lasso selection ---
-
-  /// True while the canvas is being panned/zoomed, so the popup doesn't lag
-  /// a frame behind the selection it's attached to.
-  final ValueNotifier<bool> _selectionPopupSuppressed = ValueNotifier(false);
-  Timer? _selectionPopupResumeTimer;
-  Matrix4? _lastPopupTransform;
-
-  void _onTransformationChangedForPopup() {
-    final current = _transformationController.value;
-    if (_lastPopupTransform != null && _lastPopupTransform == current) return;
-    _lastPopupTransform = current.clone();
-
-    if (currentTool is! Select) return;
-    _selectionPopupSuppressed.value = true;
-    _selectionPopupResumeTimer?.cancel();
-    _selectionPopupResumeTimer = Timer(const Duration(milliseconds: 150), () {
-      _selectionPopupSuppressed.value = false;
-    });
-  }
-
-  final _canvasAreaKey = GlobalKey();
-
-  /// The popup that sits next to the lasso selection, or null if there's
-  /// nothing selected (or the selection isn't on screen).
-  Widget? _buildSelectionPopup() {
-    final tool = currentTool;
-    if (tool is! Select || !tool.doneSelecting) return null;
-    if (tool.selectResult.isEmpty) return null;
-    if (_selectionPopupSuppressed.value) return null;
-
-    final pageIndex = tool.selectResult.pageIndex;
-    if (pageIndex < 0 || pageIndex >= coreInfo.pages.length) return null;
-
-    final pageBox = coreInfo.pages[pageIndex].renderBox;
-    final areaBox = _canvasAreaKey.currentContext?.findRenderObject();
-    if (pageBox == null ||
-        !pageBox.attached ||
-        areaBox is! RenderBox ||
-        !areaBox.attached) {
-      return null;
-    }
-
-    final pageToArea = pageBox.getTransformTo(areaBox);
-    final selectionRect = MatrixUtils.transformRect(
-      pageToArea,
-      tool.selectResult.path.getBounds(),
-    );
-
-    // Hide the menu if the selection is scrolled completely out of view.
-    if (!selectionRect.overlaps(Offset.zero & areaBox.size)) return null;
-
-    return SelectionPopup(
-      selectionRect: selectionRect,
-      duplicateSelection: duplicateSelection,
-      copySelection: copySelection,
-      deleteSelection: deleteSelection,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.of(context);
@@ -1711,44 +1466,6 @@ class EditorState extends State<Editor> {
       transformationController: _transformationController,
     );
 
-    // The circle showing the eraser's area of effect is drawn over the canvas.
-    final Widget canvasArea = Stack(
-      key: _canvasAreaKey,
-      fit: StackFit.expand,
-      children: [
-        MouseRegion(
-          opaque: false,
-          onExit: (_) => _eraserPointer.value = null,
-          child: Listener(
-            onPointerHover: _trackEraserPointer,
-            onPointerDown: _trackEraserPointer,
-            onPointerMove: _trackEraserPointer,
-            onPointerUp: _pointerLeftCanvas,
-            onPointerCancel: (_) => _eraserPointer.value = null,
-            child: canvas,
-          ),
-        ),
-        if (currentTool is Eraser)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: EraserCursor(
-                pointer: _eraserPointer,
-                radiusAt: _eraserRadiusOnScreen,
-              ),
-            ),
-          ),
-        if (currentTool is Select)
-          Positioned.fill(
-            child: ValueListenableBuilder(
-              valueListenable: _selectionPopupSuppressed,
-              builder: (context, _, _) {
-                return _buildSelectionPopup() ?? const SizedBox.shrink();
-              },
-            ),
-          ),
-      ],
-    );
-
     final readonlyBanner = ReadOnlyBanner(
       coreInfo.readOnlyReason,
       action: coreInfo.readOnlyReason == .versionTooNew
@@ -1786,6 +1503,8 @@ class EditorState extends State<Editor> {
                 Highlighter.currentHighlighter = tool;
               } else if (tool is Pencil) {
                 Pencil.currentPencil = tool;
+              } else if (tool is Marker) {
+                Marker.currentMarker = tool;
               } else if (tool is Pen) {
                 Pen.currentPen = tool;
               }
@@ -1793,6 +1512,80 @@ class EditorState extends State<Editor> {
               if (mounted) setState(() {});
             },
             currentTool: currentTool,
+            duplicateSelection: () {
+              final select = currentTool as Select;
+              if (!select.doneSelecting) return;
+
+              setState(() {
+                final page = coreInfo.pages[select.selectResult.pageIndex];
+                final strokes = select.selectResult.strokes;
+                final images = select.selectResult.images;
+
+                const duplicationFeedbackOffset = Offset(25, -25);
+
+                final duplicatedStrokes = strokes.map((stroke) {
+                  return stroke.copy()..shift(duplicationFeedbackOffset);
+                }).toList();
+
+                final duplicatedImages = images.map((image) {
+                  return image.copy()
+                    ..id = coreInfo.nextImageId++
+                    ..dstRect.shift(duplicationFeedbackOffset);
+                }).toList();
+
+                page.strokes.addAll(duplicatedStrokes);
+                page.images.addAll(duplicatedImages);
+
+                select.selectResult = select.selectResult.copyWith(
+                  strokes: duplicatedStrokes,
+                  images: duplicatedImages,
+                  path: select.selectResult.path.shift(
+                    duplicationFeedbackOffset,
+                  ),
+                );
+
+                history.recordChange(
+                  EditorHistoryItem(
+                    type: .draw,
+                    pageIndex: select.selectResult.pageIndex,
+                    strokes: duplicatedStrokes,
+                    images: duplicatedImages,
+                  ),
+                );
+                autosaveAfterDelay();
+              });
+            },
+            deleteSelection: () {
+              final select = currentTool as Select;
+              if (!select.doneSelecting) {
+                return;
+              }
+
+              setState(() {
+                final page = coreInfo.pages[select.selectResult.pageIndex];
+                final strokes = select.selectResult.strokes;
+                final images = select.selectResult.images;
+
+                for (final stroke in strokes) {
+                  page.strokes.remove(stroke);
+                }
+                for (final image in images) {
+                  page.images.remove(image);
+                }
+
+                select.unselect();
+
+                history.recordChange(
+                  EditorHistoryItem(
+                    type: .erase,
+                    pageIndex: strokes.first.pageIndex,
+                    strokes: strokes,
+                    images: images,
+                  ),
+                );
+                autosaveAfterDelay();
+              });
+            },
             setColor: (color) {
               setState(() {
                 updateColorBar(color);
@@ -1866,6 +1659,65 @@ class EditorState extends State<Editor> {
       );
     }
 
+    final isEraser = currentTool is Eraser;
+    final Widget canvasArea = Stack(
+      fit: StackFit.expand,
+      children: [
+        MouseRegion(
+          cursor: isEraser ? SystemMouseCursors.precise : MouseCursor.defer,
+          onExit: (_) => _eraserCircle.value = null,
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _updateEraserCircle,
+            onPointerMove: _updateEraserCircle,
+            onPointerHover: _updateEraserCircle,
+            onPointerUp: _onEraserPointerUp,
+            onPointerCancel: _onEraserPointerUp,
+            child: canvas,
+          ),
+        ),
+        if (isEraser)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ValueListenableBuilder(
+                valueListenable: _eraserCircle,
+                builder: (context, circle, _) => CustomPaint(
+                  painter: EraserCursorPainter(
+                    circle: circle,
+                    color: colorScheme.primary,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (DynamicMaterialApp.isFullscreen)
+          Positioned.fill(
+            child: SafeArea(
+              minimum: const EdgeInsets.all(8),
+              bottom: false,
+              child: Align(
+                alignment: Alignment.topRight,
+                child: FloatingActionButton.small(
+                  heroTag: null,
+                  tooltip: t.editor.toolbar.fullscreen,
+                  elevation: 2,
+                  shape: const CircleBorder(),
+                  backgroundColor: colorScheme.surfaceContainerHigh.withValues(
+                    alpha: 0.92,
+                  ),
+                  foregroundColor: colorScheme.onSurfaceVariant,
+                  onPressed: () => DynamicMaterialApp.setFullscreen(
+                    false,
+                    updateSystem: true,
+                  ),
+                  child: const Icon(Symbols.fullscreen_exit),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+
     // The toolbar edge is drag-controlled now: rebuild the layout
     // whenever the persisted alignment changes.
     final Widget body = ValueListenableBuilder(
@@ -1908,8 +1760,13 @@ class EditorState extends State<Editor> {
       builder: (context, savingState, child) {
         // don't allow user to go back until saving is done
         return PopScope(
-          canPop: savingState == .saved,
+          canPop: savingState == .saved && !DynamicMaterialApp.isFullscreen,
           onPopInvokedWithResult: (didPop, _) {
+            // In fullscreen, back leaves fullscreen instead of the note.
+            if (!didPop && DynamicMaterialApp.isFullscreen) {
+              DynamicMaterialApp.setFullscreen(false, updateSystem: true);
+              return;
+            }
             switch (savingState) {
               case .waitingToSave:
                 assert(!didPop);
@@ -2080,53 +1937,7 @@ class EditorState extends State<Editor> {
                   ),
                 ],
               ),
-        body: Stack(
-          children: [
-            body,
-            if (DynamicMaterialApp.isFullscreen)
-              _buildExitFullscreenButton(context),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Floating button in the top right corner that leaves fullscreen.
-  Widget _buildExitFullscreenButton(BuildContext context) {
-    final colorScheme = ColorScheme.of(context);
-
-    // A right-hand toolbar that stays visible in fullscreen would sit under
-    // the button, so shift the button left of it.
-    final toolbarOnRight =
-        stows.editorToolbarAlignment.value == AxisDirection.right &&
-        stows.editorToolbarShowInFullscreen.value;
-    const verticalToolbarWidth = 80.0;
-
-    return Positioned(
-      top: 0,
-      right: toolbarOnRight ? verticalToolbarWidth : 0,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Material(
-            color: colorScheme.surfaceContainerHigh,
-            elevation: 4,
-            shadowColor: Colors.black,
-            shape: const CircleBorder(),
-            child: IconButton(
-              style: IconButton.styleFrom(
-                fixedSize: const Size(44, 44),
-                padding: EdgeInsets.zero,
-                foregroundColor: colorScheme.onSurface,
-              ),
-              icon: const Icon(Symbols.fullscreen_exit),
-              tooltip: t.editor.toolbar.fullscreen,
-              onPressed: () {
-                DynamicMaterialApp.setFullscreen(false, updateSystem: true);
-              },
-            ),
-          ),
-        ),
+        body: body,
       ),
     );
   }
@@ -2145,6 +1956,8 @@ class EditorState extends State<Editor> {
 
     return EditorBottomSheet(
       invert: invert,
+      canExport: !coreInfo.readOnly,
+      openExport: () => showExportOptions.value = true,
       coreInfo: coreInfo,
       currentPageIndex: currentPageIndex,
       setBackgroundPattern: (pattern) => setState(() {
@@ -2197,7 +2010,6 @@ class EditorState extends State<Editor> {
         if (coreInfo.readOnly) return;
         autosaveAfterDelay();
       }),
-      showExportOptions: () => showExportOptions.value = true,
       pickPhotos: _pickPhotos,
       importPdf: importPdf,
       canRasterPdf: Editor.canRasterPdf,
@@ -2462,9 +2274,6 @@ class EditorState extends State<Editor> {
     unawaited(_cleanUpAsync());
 
     DynamicMaterialApp.removeFullscreenListener(_setState);
-    _transformationController.removeListener(_onTransformationChangedForPopup);
-    _selectionPopupResumeTimer?.cancel();
-    _selectionPopupSuppressed.dispose();
 
     _delayedSaveTimer?.cancel();
     _watchServerTimer?.cancel();
@@ -2481,7 +2290,7 @@ class EditorState extends State<Editor> {
 
     super.dispose();
     showExportOptions.dispose();
-    _eraserPointer.dispose();
+    _eraserCircle.dispose();
   }
 
   Future<void> _cleanUpAsync() async {

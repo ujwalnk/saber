@@ -16,10 +16,17 @@ double sqrDistanceBetween(Offset p1, Offset p2) =>
 typedef EraseResult = ({List<Stroke> erased, List<Stroke> added});
 
 class Eraser extends Tool {
-  /// Radius of the eraser in page units. Unless a size was given to the
-  /// constructor this follows the eraser popup live.
-  double get size => _sizeOverride ?? stows.eraserSize.value;
-  final double? _sizeOverride;
+  /// Limits of the size slider (the eraser's radius, in page units).
+  static const double sizeMin = 2;
+  static const double sizeMax = 60;
+  static const double sizeStep = 1;
+
+  /// A fixed size, or null to follow [Stows.eraserSize] live.
+  final double? _size;
+
+  /// The eraser's radius in page units.
+  double get size => _size ?? stows.eraserSize.value;
+  double get sqrSize => square(size);
 
   /// Strokes that were on the page before this drag and have been removed
   /// (completely, or replaced by the pieces left over).
@@ -28,7 +35,7 @@ class Eraser extends Tool {
   /// Pieces created during this drag that are still on the page.
   final Set<Stroke> _added = {};
 
-  new({double? size}) : _sizeOverride = size;
+  new({double? size}) : _size = size;
 
   @override
   ToolId get toolId => .eraser;
@@ -37,19 +44,12 @@ class Eraser extends Tool {
   ///
   /// By default only the touched part of each stroke is removed: the stroke
   /// is cut and the untouched pieces stay. With
-  /// [Stows.eraseWholeStrokes] the whole stroke goes instead. With
-  /// [Stows.eraseHighlighterOnly] everything except highlighter strokes is
-  /// left alone.
+  /// [Stows.eraseWholeStrokes] the whole stroke goes instead.
   void erase(Offset from, Offset to, EditorPage page) {
     final wholeStrokes = stows.eraseWholeStrokes.value;
-    final highlighterOnly = stows.eraseHighlighterOnly.value;
-    final size = this.size;
-    final sqrSize = square(size);
 
     // iterate over a copy: we modify page.strokes as we go
     for (final stroke in List<Stroke>.of(page.strokes)) {
-      if (highlighterOnly && stroke.toolId != ToolId.highlighter) continue;
-
       final List<Stroke>? pieces;
       if (wholeStrokes || stroke.runtimeType != Stroke) {
         // shapes (circles, rectangles) can't be cut
