@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' show max;
+import 'dart:math' show max, min;
 
 import 'package:collapsible/collapsible.dart';
 import 'package:file_picker/file_picker.dart';
@@ -29,6 +29,7 @@ import 'package:saber/components/theming/adaptive_alert_dialog.dart';
 import 'package:saber/components/theming/adaptive_icon.dart';
 import 'package:saber/components/theming/dynamic_material_app.dart';
 import 'package:saber/components/theming/saber_theme.dart';
+import 'package:saber/components/toolbar/selection_popup.dart';
 import 'package:saber/components/toolbar/color_bar.dart';
 import 'package:saber/components/toolbar/editor_bottom_sheet.dart';
 import 'package:saber/components/toolbar/editor_page_manager.dart';
@@ -160,6 +161,7 @@ class EditorState extends State<Editor> {
   Tool get currentTool => _currentTool;
   set currentTool(Tool tool) {
     _currentTool = tool;
+    _selectionPopupRect.value = null;
     if (tool is! Eraser) _lastNonEraserTool = tool;
     _eraserCircle.value = null;
     stows.lastTool.value = tool.toolId;
@@ -186,6 +188,193 @@ class EditorState extends State<Editor> {
   /// and its radius on screen. Null when the circle is hidden.
   final ValueNotifier<({Offset center, double radius})?> _eraserCircle =
       ValueNotifier(null);
+
+  /// The canvas-area Stack used to position the selection popup.
+  final GlobalKey _canvasAreaKey = GlobalKey();
+
+  /// Selection bounds in canvas-area coordinates; null when no selection
+  /// should display the popup.
+  final ValueNotifier<Rect?> _selectionPopupRect = ValueNotifier(null);
+
+  /// A private in-app clipboard for copied lasso selections.
+  /// The normal system clipboard continues to be used for copied images.
+  dynamic _copiedSelection;
+
+  /// Recomputes the selection popup's position in canvas-area coordinates.
+  void _updateSelectionPopupRect() {
+    if (currentTool is! Select) {
+      _selectionPopupRect.value = null;
+      return;
+    }
+
+    final select = currentTool as Select;
+    if (!select.doneSelecting || select.selectResult.isEmpty) {
+      _selectionPopupRect.value = null;
+      return;
+    }
+
+    final pageIndex = select.selectResult.pageIndex;
+    if (pageIndex < 0 || pageIndex >= coreInfo.pages.length) {
+      _selectionPopupRect.value = null;
+      return;
+    }
+
+    final pageBox = coreInfo.pages[pageIndex].renderBox;
+    final canvasBox = _canvasAreaKey.currentContext?.findRenderObject();
+    if (pageBox == null ||
+        !pageBox.attached ||
+        canvasBox is! RenderBox ||
+        !canvasBox.attached ||
+        !canvasBox.hasSize) {
+      _selectionPopupRect.value = null;
+      return;
+    }
+
+    final bounds = select.selectResult.path.getBounds();
+    if (bounds.isEmpty) {
+      _selectionPopupRect.value = null;
+      return;
+    }
+
+    final topLeft = canvasBox.globalToLocal(
+      pageBox.localToGlobal(bounds.topLeft),
+    );
+    final bottomRight = canvasBox.globalToLocal(
+      pageBox.localToGlobal(bounds.bottomRight),
+    );
+    _selectionPopupRect.value = Rect.fromLTRB(
+      min(topLeft.dx, bottomRight.dx),
+      min(topLeft.dy, bottomRight.dy),
+      max(topLeft.dx, bottomRight.dx),
+      max(topLeft.dy, bottomRight.dy),
+    );
+  }
+
+  void _duplicateSelection() {
+    if (coreInfo.readOnly || currentTool is! Select) return;
+    final select = currentTool as Select;
+    if (!select.doneSelecting || select.selectResult.isEmpty) return;
+
+    setState(() {
+      final result = select.selectResult;
+      final page = coreInfo.pages[result.pageIndex];
+      const offset = Offset(25, -25);
+
+      final duplicatedStrokes = result.strokes
+          .map((stroke) => stroke.copy()..shift(offset))
+          .toList();
+      final duplicatedImages = result.images.map((image) {
+        final copy = image.copy()
+          ..id = coreInfo.nextImageId++
+          ..pageIndex = result.pageIndex;
+        copy.dstRect = copy.dstRect.shift(offset);
+        return copy;
+      }).toList();
+
+      page.strokes.addAll(duplicatedStrokes);
+      page.images.addAll(duplicatedImages);
+
+      select.selectResult = result.copyWith(
+        strokes: duplicatedStrokes,
+        images: duplicatedImages,
+        path: result.path.shift(offset),
+      );
+
+      history.recordChange(
+        EditorHistoryItem(
+          type: .draw,
+          pageIndex: result.pageIndex,
+          strokes: duplicatedStrokes,
+          images: duplicatedImages,
+        ),
+      );
+      autosaveAfterDelay();
+    });
+    _updateSelectionPopupRect();
+  }
+
+  void _copySelection() {
+    if (currentTool is! Select) return;
+    final select = currentTool as Select;
+    if (!select.doneSelecting || select.selectResult.isEmpty) return;
+
+    final result = select.selectResult;
+    _copiedSelection = result.copyWith(
+      strokes: result.strokes.map((stroke) => stroke.copy()).toList(),
+      images: result.images.map((image) => image.copy()).toList(),
+    );
+  }
+
+  void _deleteSelection() {
+    if (coreInfo.readOnly || currentTool is! Select) return;
+    final select = currentTool as Select;
+    if (!select.doneSelecting || select.selectResult.isEmpty) return;
+
+    setState(() {
+      final result = select.selectResult;
+      final page = coreInfo.pages[result.pageIndex];
+      final strokes = List<Stroke>.of(result.strokes);
+      final images = List<EditorImage>.of(result.images);
+
+      for (final stroke in strokes) {
+        page.strokes.remove(stroke);
+      }
+      for (final image in images) {
+        page.images.remove(image);
+      }
+
+      select.unselect();
+      _selectionPopupRect.value = null;
+      history.recordChange(
+        EditorHistoryItem(
+          type: .erase,
+          pageIndex: result.pageIndex,
+          strokes: strokes,
+          images: images,
+        ),
+      );
+      autosaveAfterDelay();
+    });
+  }
+
+  /// Pastes the in-app copied selection onto the currently focused page.
+  /// Returns false when the in-app clipboard is empty so the caller can fall
+  /// back to the operating-system clipboard for images.
+  bool _pasteCopiedSelection() {
+    final copied = _copiedSelection;
+    if (copied == null || coreInfo.readOnly) return false;
+
+    final pageIndex = currentPageIndex;
+    const offset = Offset(25, -25);
+    final strokes = (copied.strokes as List<Stroke>).map((stroke) {
+      return stroke.copy()
+        ..pageIndex = pageIndex
+        ..shift(offset);
+    }).toList();
+    final images = (copied.images as List<EditorImage>).map((image) {
+      final copy = image.copy()
+        ..id = coreInfo.nextImageId++
+        ..pageIndex = pageIndex;
+      copy.dstRect = copy.dstRect.shift(offset);
+      return copy;
+    }).toList();
+
+    setState(() {
+      createPage(pageIndex);
+      coreInfo.pages[pageIndex].strokes.addAll(strokes);
+      coreInfo.pages[pageIndex].images.addAll(images);
+      history.recordChange(
+        EditorHistoryItem(
+          type: .draw,
+          pageIndex: pageIndex,
+          strokes: strokes,
+          images: images,
+        ),
+      );
+      autosaveAfterDelay();
+    });
+    return true;
+  }
 
   /// How many screen pixels one page unit takes up at [globalPosition].
   double? _pageUnitOnScreen(Offset globalPosition) {
@@ -495,9 +684,11 @@ class EditorState extends State<Editor> {
 
       if (item.type != .move) {
         Select.currentSelect.unselect();
+        _selectionPopupRect.value = null;
       }
     });
 
+    if (item.type == .move) _updateSelectionPopupRect();
     autosaveAfterDelay();
   }
 
@@ -577,6 +768,13 @@ class EditorState extends State<Editor> {
   /// Used to record a move in the history.
   Offset moveOffset = .zero;
 
+  /// Set while a lasso selection is dragged from one page onto another:
+  /// the page it started on, and copies of its contents as they were before
+  /// the drag. Used to record a single undoable change when the drag ends.
+  int? _selectionOriginPage;
+  List<Stroke>? _originStrokes;
+  List<EditorImage>? _originImages;
+
   var isHovering = true;
   int? dragPageIndex;
   PointerDeviceKind? currentPointerKind;
@@ -645,6 +843,7 @@ class EditorState extends State<Editor> {
           select.selectResult.path.contains(position)) {
         // drag selection in onDrawUpdate
       } else {
+        _selectionPopupRect.value = null;
         select.onDragStart(position, dragPageIndex!);
         history.canRedo = true; // selection doesn't affect history
       }
@@ -654,6 +853,9 @@ class EditorState extends State<Editor> {
 
     previousPosition = position;
     moveOffset = .zero;
+    _selectionOriginPage = null;
+    _originStrokes = null;
+    _originImages = null;
 
     if (currentTool is! Select) {
       Select.currentSelect.unselect();
@@ -663,7 +865,75 @@ class EditorState extends State<Editor> {
     setState(() {});
   }
 
+  /// While dragging a lasso selection, moves it onto the page that is under
+  /// the pointer, so it stays visible (and is saved) on the page it is
+  /// dropped on.
+  void _rehomeSelectionIfNeeded(Select select, Offset globalFocalPoint) {
+    final to = onWhichPageIsFocalPoint(globalFocalPoint);
+    final from = dragPageIndex!;
+    if (to == null || to == from) return;
+
+    final srcPage = coreInfo.pages[from];
+    final dstPage = coreInfo.pages[to];
+    final srcBox = srcPage.renderBox;
+    final dstBox = dstPage.renderBox;
+    if (srcBox == null ||
+        dstBox == null ||
+        !srcBox.attached ||
+        !dstBox.attached) {
+      return;
+    }
+
+    final result = select.selectResult;
+
+    // remember what the selection looked like before this drag, once
+    if (_selectionOriginPage == null) {
+      _selectionOriginPage = from;
+      _originStrokes = [
+        for (final stroke in result.strokes) stroke.copy()..shift(-moveOffset),
+      ];
+      _originImages = [
+        for (final image in result.images)
+          image.copy()..dstRect = image.dstRect.shift(-moveOffset),
+      ];
+    }
+
+    // converts page [from] coordinates into page [to] coordinates
+    final delta = dstBox.globalToLocal(srcBox.localToGlobal(Offset.zero));
+
+    for (final stroke in result.strokes) {
+      srcPage.strokes.remove(stroke);
+      stroke
+        ..shift(delta)
+        ..pageIndex = to
+        ..page = dstPage;
+      dstPage.insertStroke(stroke);
+    }
+    for (final image in result.images) {
+      srcPage.images.remove(image);
+      image
+        ..pageIndex = to
+        ..dstRect = image.dstRect.shift(delta);
+      dstPage.images.add(image);
+    }
+
+    select.selectResult = result.copyWith(
+      pageIndex: to,
+      path: result.path.shift(delta),
+    );
+
+    dragPageIndex = to;
+    previousPosition += delta;
+    srcPage.redrawStrokes();
+    dstPage.redrawStrokes();
+    setState(() {});
+  }
+
   void onDrawUpdate(ScaleUpdateDetails details) {
+    if (currentTool is Select && (currentTool as Select).doneSelecting) {
+      _rehomeSelectionIfNeeded(currentTool as Select, details.focalPoint);
+    }
+
     final page = coreInfo.pages[dragPageIndex!];
     final position = page.renderBox!.globalToLocal(details.focalPoint);
     final offset = position - previousPosition;
@@ -685,6 +955,7 @@ class EditorState extends State<Editor> {
           image.dstRect = image.dstRect.shift(offset);
         }
         select.selectResult.path = select.selectResult.path.shift(offset);
+        _updateSelectionPopupRect();
       } else {
         select.onDragUpdate(position);
       }
@@ -749,9 +1020,32 @@ class EditorState extends State<Editor> {
           ),
         );
       } else if (currentTool is Select) {
-        if (moveOffset == .zero) return;
+        if (moveOffset == .zero && _selectionOriginPage == null) return;
         final select = currentTool as Select;
-        if (select.doneSelecting) {
+        if (select.doneSelecting && _selectionOriginPage != null) {
+          // the selection was dragged across pages: undo puts the original
+          // back on its page, redo puts the dropped one back
+          history.recordChange(
+            EditorHistoryItem(
+              type: .erase,
+              pageIndex: _selectionOriginPage!,
+              strokes: _originStrokes!,
+              images: _originImages!,
+            ),
+          );
+          history.recordChange(
+            EditorHistoryItem(
+              type: .draw,
+              pageIndex: dragPageIndex!,
+              strokes: List.of(select.selectResult.strokes),
+              images: List.of(select.selectResult.images),
+            ),
+          );
+          _selectionOriginPage = null;
+          _originStrokes = null;
+          _originImages = null;
+          _updateSelectionPopupRect();
+        } else if (select.doneSelecting) {
           history.recordChange(
             EditorHistoryItem(
               type: .move,
@@ -772,6 +1066,9 @@ class EditorState extends State<Editor> {
 
           if (select.selectResult.isEmpty) {
             Select.currentSelect.unselect();
+            _selectionPopupRect.value = null;
+          } else {
+            _updateSelectionPopupRect();
           }
         }
       } else if (currentTool is LaserPointer) {
@@ -1314,6 +1611,8 @@ class EditorState extends State<Editor> {
   }
 
   Future paste() async {
+    if (_pasteCopiedSelection()) return;
+
     /// Maps image formats to their file extension.
     const Map<SimpleFileFormat, String> formats = {
       Formats.jpeg: '.jpeg',
@@ -1512,80 +1811,6 @@ class EditorState extends State<Editor> {
               if (mounted) setState(() {});
             },
             currentTool: currentTool,
-            duplicateSelection: () {
-              final select = currentTool as Select;
-              if (!select.doneSelecting) return;
-
-              setState(() {
-                final page = coreInfo.pages[select.selectResult.pageIndex];
-                final strokes = select.selectResult.strokes;
-                final images = select.selectResult.images;
-
-                const duplicationFeedbackOffset = Offset(25, -25);
-
-                final duplicatedStrokes = strokes.map((stroke) {
-                  return stroke.copy()..shift(duplicationFeedbackOffset);
-                }).toList();
-
-                final duplicatedImages = images.map((image) {
-                  return image.copy()
-                    ..id = coreInfo.nextImageId++
-                    ..dstRect.shift(duplicationFeedbackOffset);
-                }).toList();
-
-                page.strokes.addAll(duplicatedStrokes);
-                page.images.addAll(duplicatedImages);
-
-                select.selectResult = select.selectResult.copyWith(
-                  strokes: duplicatedStrokes,
-                  images: duplicatedImages,
-                  path: select.selectResult.path.shift(
-                    duplicationFeedbackOffset,
-                  ),
-                );
-
-                history.recordChange(
-                  EditorHistoryItem(
-                    type: .draw,
-                    pageIndex: select.selectResult.pageIndex,
-                    strokes: duplicatedStrokes,
-                    images: duplicatedImages,
-                  ),
-                );
-                autosaveAfterDelay();
-              });
-            },
-            deleteSelection: () {
-              final select = currentTool as Select;
-              if (!select.doneSelecting) {
-                return;
-              }
-
-              setState(() {
-                final page = coreInfo.pages[select.selectResult.pageIndex];
-                final strokes = select.selectResult.strokes;
-                final images = select.selectResult.images;
-
-                for (final stroke in strokes) {
-                  page.strokes.remove(stroke);
-                }
-                for (final image in images) {
-                  page.images.remove(image);
-                }
-
-                select.unselect();
-
-                history.recordChange(
-                  EditorHistoryItem(
-                    type: .erase,
-                    pageIndex: strokes.first.pageIndex,
-                    strokes: strokes,
-                    images: images,
-                  ),
-                );
-                autosaveAfterDelay();
-              });
-            },
             setColor: (color) {
               setState(() {
                 updateColorBar(color);
@@ -1601,26 +1826,27 @@ class EditorState extends State<Editor> {
                   final select = currentTool as Select;
                   if (select.doneSelecting) {
                     final strokes = select.selectResult.strokes;
+                    if (strokes.isNotEmpty) {
+                      final colorChange = <Stroke, Change<Color>>{};
+                      for (final stroke in strokes) {
+                        colorChange[stroke] = Change(
+                          previous: stroke.color,
+                          current: color,
+                        );
+                        stroke.color = color;
+                      }
 
-                    final colorChange = <Stroke, Change<Color>>{};
-                    for (final stroke in strokes) {
-                      colorChange[stroke] = Change(
-                        previous: stroke.color,
-                        current: color,
+                      history.recordChange(
+                        EditorHistoryItem(
+                          type: .changeColor,
+                          pageIndex: select.selectResult.pageIndex,
+                          strokes: strokes,
+                          colorChange: colorChange,
+                          images: [],
+                        ),
                       );
-                      stroke.color = color;
+                      autosaveAfterDelay();
                     }
-
-                    history.recordChange(
-                      EditorHistoryItem(
-                        type: .changeColor,
-                        pageIndex: strokes.first.pageIndex,
-                        strokes: strokes,
-                        colorChange: colorChange,
-                        images: [],
-                      ),
-                    );
-                    autosaveAfterDelay();
                   }
                 }
               });
@@ -1661,6 +1887,7 @@ class EditorState extends State<Editor> {
 
     final isEraser = currentTool is Eraser;
     final Widget canvasArea = Stack(
+      key: _canvasAreaKey,
       fit: StackFit.expand,
       children: [
         MouseRegion(
@@ -1715,6 +1942,20 @@ class EditorState extends State<Editor> {
               ),
             ),
           ),
+        ValueListenableBuilder<Rect?>(
+          valueListenable: _selectionPopupRect,
+          builder: (context, selectionRect, _) {
+            if (selectionRect == null || coreInfo.readOnly) {
+              return const SizedBox.shrink();
+            }
+            return SelectionPopup(
+              selectionRect: selectionRect,
+              duplicateSelection: _duplicateSelection,
+              copySelection: _copySelection,
+              deleteSelection: _deleteSelection,
+            );
+          },
+        ),
       ],
     );
 
@@ -2291,6 +2532,7 @@ class EditorState extends State<Editor> {
     super.dispose();
     showExportOptions.dispose();
     _eraserCircle.dispose();
+    _selectionPopupRect.dispose();
   }
 
   Future<void> _cleanUpAsync() async {

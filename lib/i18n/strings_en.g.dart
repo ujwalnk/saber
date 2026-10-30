@@ -1263,6 +1263,9 @@ class Translations$editor$selectionBar$en {
 	// Translations
 
 	/// en: 'Delete'
+	String get copy => 'Copy';
+
+	/// en: 'Delete'
 	String get delete => 'Delete';
 
 	/// en: 'Duplicate'

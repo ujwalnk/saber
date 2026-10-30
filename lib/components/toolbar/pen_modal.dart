@@ -54,7 +54,8 @@ class _PenModalState extends State<PenModal> {
     final selected = WritingTool.of(currentPen);
     final isShapePen = currentPen is ShapePen;
     final showNibSettings =
-        selected == WritingTool.inkPen && currentPen.toolId == ToolId.fountainPen;
+        selected == WritingTool.inkPen &&
+        currentPen.toolId == ToolId.fountainPen;
 
     return SizedBox(
       width: widget.width,
@@ -82,11 +83,7 @@ class _PenModalState extends State<PenModal> {
                 ],
               ),
             ),
-            Divider(
-              height: 1,
-              thickness: 1,
-              color: colorScheme.outlineVariant,
-            ),
+            Divider(height: 1, thickness: 1, color: colorScheme.outlineVariant),
             const SizedBox(height: 4),
             _shapePenToggle(colorScheme, isShapePen),
             SizePicker(axis: Axis.horizontal, pen: currentPen),
@@ -131,7 +128,9 @@ class _PenModalState extends State<PenModal> {
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: () => setState(() {
-            widget.setTool(isShapePen ? WritingTool.inkPen.instance : ShapePen());
+            widget.setTool(
+              isShapePen ? WritingTool.inkPen.instance : ShapePen(),
+            );
           }),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

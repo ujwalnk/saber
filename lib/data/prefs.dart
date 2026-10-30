@@ -182,6 +182,14 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// When true, every highlighter stroke is straightened (any length).
+  /// Set from the highlighter popup; pens and pencil are not affected.
+  final straightenHighlighter = PlainStow(
+    'straightenHighlighter',
+    false,
+    volatile: !_isOnMainIsolate,
+  );
+
   /// In fullscreen, also hide the system navigation bar (Android).
   /// When false, only the status bar and the app's own top bar are hidden.
   final hideNavBarInFullscreen = PlainStow(
@@ -198,10 +206,17 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
-  /// The eraser's radius in page units, so on screen it scales with the zoom.
+  /// Radius of the eraser, in page units. Set from the eraser popup.
   final eraserSize = PlainStow<double>(
     'eraserSize',
     10,
+    volatile: !_isOnMainIsolate,
+  );
+
+  /// When true, the eraser only touches highlighter strokes.
+  final eraseHighlighterOnly = PlainStow(
+    'eraseHighlighterOnly',
+    false,
     volatile: !_isOnMainIsolate,
   );
 

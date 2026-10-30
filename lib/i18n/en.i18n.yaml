@@ -328,6 +328,7 @@ editor:
     removeAsBackground: Remove as background
     delete: Delete
   selectionBar:
+    copy: Copy
     delete: Delete
     duplicate: Duplicate
   menu:

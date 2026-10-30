@@ -31,6 +31,20 @@ class LaserPointer extends Tool {
   /// Stopwatch used to find the time elapsed since the last point.
   final _stopwatch = Stopwatch();
 
+  /// Everything drawn with the laser since it last faded away completely.
+  ///
+  /// The laser is handled as one session: the strokes fade out together, and
+  /// as soon as a new stroke starts, every stroke of the session is brought
+  /// back in full, so it is never left partly erased.
+  static final List<_LaserSessionEntry> _session = [];
+
+  /// Bumped whenever the session is restored or its fade-out restarts, which
+  /// cancels the fade-out that was running.
+  static int _generation = 0;
+
+  /// The page the current stroke is being drawn on.
+  EditorPage? _page;
+
   /// Whether the user is currently drawing with the laser.
   /// This is used to prevent strokes fading out until the user
   /// has finished drawing.
@@ -38,6 +52,8 @@ class LaserPointer extends Tool {
 
   void onDragStart(Offset position, EditorPage page, int pageIndex) {
     isDrawing = true;
+    _page = page;
+    _restoreSession();
     Pen.currentStroke = LaserStroke(
       color: outerColor,
       pressureEnabled: pressureEnabled,
@@ -70,18 +86,75 @@ class LaserPointer extends Tool {
     Pen.currentStroke = null;
     if (stroke is! LaserStroke) return null;
 
-    unawaited(
-      fadeOutStroke(
+    stroke
+      ..options.isComplete = true
+      ..markPolygonNeedsUpdating();
+
+    final page = _page;
+    if (page == null) {
+      // not drawn through onDragStart: fade this stroke out by itself
+      unawaited(
+        fadeOutStroke(
+          stroke: stroke,
+          strokePointDelays: strokePointDelays,
+          redrawPage: redrawPage,
+          deleteStroke: deleteStroke,
+        ),
+      );
+      return stroke;
+    }
+
+    _session.add(
+      _LaserSessionEntry(
         stroke: stroke,
-        strokePointDelays: strokePointDelays,
+        page: page,
+        originalPoints: List.of(stroke.points),
+        strokePointDelays: List.of(strokePointDelays),
         redrawPage: redrawPage,
         deleteStroke: deleteStroke,
       ),
     );
+    unawaited(_fadeOutSession());
 
-    return stroke
-      ..options.isComplete = true
-      ..markPolygonNeedsUpdating();
+    return stroke;
+  }
+
+  /// Puts every stroke of the session back exactly as it was drawn, and
+  /// stops the fade-out that was in progress.
+  static void _restoreSession() {
+    _generation++;
+    for (final entry in _session) {
+      entry.stroke.points
+        ..clear()
+        ..addAll(entry.originalPoints);
+      entry.stroke.markPolygonNeedsUpdating();
+      // strokes that already finished fading were removed from the page
+      if (!entry.page.laserStrokes.contains(entry.stroke)) {
+        entry.page.laserStrokes.add(entry.stroke);
+      }
+      entry.redrawPage();
+    }
+  }
+
+  /// Fades out the whole session. A new stroke cancels this (and restores
+  /// the session) before it can finish.
+  static Future<void> _fadeOutSession() async {
+    final generation = ++_generation;
+    bool cancelled() => generation != _generation;
+
+    final entries = List.of(_session);
+    await Future.wait([
+      for (final entry in entries)
+        fadeOutStroke(
+          stroke: entry.stroke,
+          strokePointDelays: entry.strokePointDelays,
+          redrawPage: entry.redrawPage,
+          deleteStroke: entry.deleteStroke,
+          isCancelled: cancelled,
+        ),
+    ]);
+
+    if (!cancelled()) _session.clear();
   }
 
   @visibleForTesting
@@ -93,11 +166,19 @@ class LaserPointer extends Tool {
     required VoidCallback redrawPage,
     required void Function(LaserStroke) deleteStroke,
     @visibleForTesting Future<void> Function(Duration) wait = Future.delayed,
+
+    /// When this returns true the fade-out stops where it is, without
+    /// touching the stroke again.
+    bool Function()? isCancelled,
   }) async {
+    bool cancelled() => isCancelled?.call() ?? false;
+
     await wait(fadeOutDelay);
+    if (cancelled()) return;
 
     for (final delay in strokePointDelays) {
       await wait(delay);
+      if (cancelled()) return;
 
       if (stroke.length <= 1) break;
 
@@ -107,15 +188,39 @@ class LaserPointer extends Tool {
       if (isDrawing) {
         // if the user starts drawing again, wait until they stop
         const waitTime = Duration(milliseconds: 100);
-        while (isDrawing) await wait(waitTime);
+        while (isDrawing && !cancelled()) await wait(waitTime);
+        if (cancelled()) return;
         // now wait the normal delay before continuing
         await wait(fadeOutDelay - waitTime);
+        if (cancelled()) return;
       }
     }
 
     deleteStroke(stroke);
     redrawPage();
   }
+}
+
+/// One laser stroke of the current session, with what's needed to fade it out
+/// and to restore it.
+class _LaserSessionEntry {
+  _LaserSessionEntry({
+    required this.stroke,
+    required this.page,
+    required this.originalPoints,
+    required this.strokePointDelays,
+    required this.redrawPage,
+    required this.deleteStroke,
+  });
+
+  final LaserStroke stroke;
+  final EditorPage page;
+
+  /// The stroke's points as drawn, before any of them faded out.
+  final List<PointVector> originalPoints;
+  final List<Duration> strokePointDelays;
+  final VoidCallback redrawPage;
+  final void Function(LaserStroke) deleteStroke;
 }
 
 class LaserStroke extends Stroke {
