@@ -879,22 +879,34 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
           translationVector.x,
           translationVector.y,
         );
+        // Pan flicks use their own, stronger friction than the scale fling
+        // so they settle quickly, and a single flick is capped to about one
+        // screen of travel so you can stop on the page you're aiming for.
+        const double panDrag = _panFlingDrag;
+        var flingVelocity = details.velocity.pixelsPerSecond;
+        final double maxTravel =
+            (context.size?.height ?? 800) * _maxFlingScreens;
+        final double travel = flingVelocity.distance / -math.log(panDrag);
+        if (travel > maxTravel) {
+          flingVelocity = flingVelocity * (maxTravel / travel);
+        }
+
         final FrictionSimulation frictionSimulationX = FrictionSimulation(
-          widget.interactionEndFrictionCoefficient,
+          panDrag,
           translation.dx,
-          details.velocity.pixelsPerSecond.dx,
+          flingVelocity.dx,
         );
         final FrictionSimulation frictionSimulationY = FrictionSimulation(
-          widget.interactionEndFrictionCoefficient,
+          panDrag,
           translation.dy,
-          details.velocity.pixelsPerSecond.dy,
+          flingVelocity.dy,
         );
         // Sample the friction simulations directly. (The previous approach
         // squeezed the whole slide into a shorter duration and then applied
         // Curves.decelerate on top, which made flings stop abruptly.)
         final double tFinal = _getFlingDuration(
-          details.velocity.pixelsPerSecond.distance,
-          widget.interactionEndFrictionCoefficient,
+          flingVelocity.distance,
+          panDrag,
         );
         _animation = _FrictionOffsetTween(
           simX: frictionSimulationX,
@@ -993,6 +1005,13 @@ class _InteractiveCanvasViewerState extends State<InteractiveCanvasViewer>
       focalPointSceneScaled - focalPointScene,
     );
   }
+
+  /// Friction for pan flicks: velocity is multiplied by this each second.
+  /// Lower = stops sooner. A fling travels about velocity / -ln(drag) pixels.
+  static const double _panFlingDrag = 0.02;
+
+  /// A single flick never travels further than this many screen heights.
+  static const double _maxFlingScreens = 1.0;
 
   /// Distance (in screen pixels) still to be scrolled from mouse wheel input.
   Offset _wheelRemaining = Offset.zero;
