@@ -348,6 +348,21 @@ class EditorCoreInfo {
     }
   }
 
+  /// Notes larger than this are parsed on a separate isolate
+  /// so that opening them doesn't block the UI thread.
+  static const _isolateThreshold = 128 * 1024;
+
+  /// Computes (and caches) the outline of every stroke.
+  /// Only the polygons are cached, because they can be sent between isolates
+  /// (unlike the `Path`s that are built from them).
+  void _precomputeStrokeOutlines() {
+    for (final page in pages) {
+      for (final stroke in page.strokes) {
+        stroke.lowQualityPolygon;
+      }
+    }
+  }
+
   static Future<EditorCoreInfo> loadFromFilePath(
     String path, {
     bool onlyFirstPage = false,
@@ -386,16 +401,24 @@ class EditorCoreInfo {
   }) async {
     EditorCoreInfo coreInfo;
     try {
-      EditorCoreInfo isolate() => EditorCoreInfo._loadFromFileIsolate(
-        jsonString,
-        bsonBytes,
-        path,
-        onlyFirstPage,
-      );
-
       final length = jsonString?.length ?? bsonBytes!.length;
-      if (alwaysUseIsolate || length > 2 * 1024 * 1024) {
-        // > 2 MB, run on a separate isolate
+      final useIsolate = alwaysUseIsolate || length > _isolateThreshold;
+
+      EditorCoreInfo isolate() {
+        final coreInfo = EditorCoreInfo._loadFromFileIsolate(
+          jsonString,
+          bsonBytes,
+          path,
+          onlyFirstPage,
+        );
+        // Building every stroke's outline is the slowest part of showing a
+        // note. Do it here, off the UI thread, so the first paint is cheap.
+        if (useIsolate && !onlyFirstPage) coreInfo._precomputeStrokeOutlines();
+        return coreInfo;
+      }
+
+      if (useIsolate) {
+        // run on a separate isolate
         final documentsDirectory = FileManager.documentsDirectory;
         coreInfo = await workerManager.execute(
           () async {

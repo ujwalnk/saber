@@ -41,9 +41,21 @@ class Stroke {
 
   List<Offset>? _lowQualityPolygon, _highQualityPolygon;
   List<Offset> get lowQualityPolygon =>
-      _lowQualityPolygon ??= getPolygon(quality: .low);
+      _lowQualityPolygon ??= _polygonFor(.low);
   List<Offset> get highQualityPolygon =>
-      _highQualityPolygon ??= getPolygon(quality: .high);
+      _highQualityPolygon ??= _polygonFor(.high);
+
+  /// The fountain pen's outline is identical at every quality, so reuse
+  /// (a copy of) one that was already computed instead of running
+  /// perfect_freehand a second time. It must be a copy because [shift]
+  /// shifts both polygons in place.
+  List<Offset> _polygonFor(StrokeQuality quality) {
+    if (toolId == .fountainPen && runtimeType == Stroke) {
+      final other = quality == .low ? _highQualityPolygon : _lowQualityPolygon;
+      if (other != null) return List.of(other);
+    }
+    return getPolygon(quality: quality);
+  }
 
   Path? _lowQualityPath, _highQualityPath;
   Path get lowQualityPath =>
