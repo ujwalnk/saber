@@ -4,6 +4,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:saber/components/toolbar/nib_settings_panel.dart';
 import 'package:saber/components/toolbar/samsung_panel.dart';
 import 'package:saber/components/toolbar/size_picker.dart';
+import 'package:saber/data/prefs.dart';
 import 'package:saber/data/tools/_tool.dart';
 import 'package:saber/data/tools/highlighter.dart';
 import 'package:saber/data/tools/pen.dart';
@@ -129,6 +130,18 @@ class _PenModalState extends State<PenModal> {
                 ),
               ),
             SizePicker(axis: Axis.horizontal, pen: currentPen),
+            if (currentPen is Highlighter)
+              SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Straighten highlighter',
+                  style: TextStyle(fontSize: 13),
+                ),
+                value: stows.straightenHighlighter.value,
+                onChanged: (value) =>
+                    setState(() => stows.straightenHighlighter.value = value),
+              ),
             if (showNibSettings) ...[
               InkWell(
                 borderRadius: BorderRadius.circular(8),

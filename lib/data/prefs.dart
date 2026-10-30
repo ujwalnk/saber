@@ -182,6 +182,14 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// When true, every highlighter stroke is straightened (any length).
+  /// Set from the highlighter popup; pens and pencil are not affected.
+  final straightenHighlighter = PlainStow(
+    'straightenHighlighter',
+    false,
+    volatile: !_isOnMainIsolate,
+  );
+
   /// In fullscreen, also hide the system navigation bar (Android).
   /// When false, only the status bar and the app's own top bar are hidden.
   final hideNavBarInFullscreen = PlainStow(

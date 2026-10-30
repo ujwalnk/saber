@@ -95,6 +95,115 @@ class _ToolbarState extends State<Toolbar> {
   final OverlayPortalController _optionsPortal = OverlayPortalController();
   final Object _optionsTapGroup = Object();
 
+  /// The toolbar buttons that open a popover. Each gets its own link so the
+  /// popover opens next to the button, not at the start of the toolbar.
+  final _anchorLinks = {for (final a in _Anchor.values) a: LayerLink()};
+  final _anchorKeys = {for (final a in _Anchor.values) a: GlobalKey()};
+
+  Widget _anchored(_Anchor anchor, Widget child) {
+    return CompositedTransformTarget(
+      key: _anchorKeys[anchor],
+      link: _anchorLinks[anchor]!,
+      child: child,
+    );
+  }
+
+  /// The button the open popover belongs to, if any.
+  _Anchor? get _activeAnchor {
+    if (showColorOptions.value) return _Anchor.colors;
+    return switch (toolOptionsType.value) {
+      ToolOptions.pen => _Anchor.pen,
+      ToolOptions.pencil => _Anchor.pencil,
+      ToolOptions.highlighter => _Anchor.highlighter,
+      ToolOptions.eraser => _Anchor.eraser,
+      _ => null,
+    };
+  }
+
+  /// Where the popover goes: on the side of the toolbar that faces the page,
+  /// lined up with its button and kept on screen. Falls back to the start of
+  /// the toolbar if the button isn't shown (e.g. hidden in Customize toolbar).
+  ({LayerLink link, Alignment target, Alignment follower, Offset offset})
+  _placement(BuildContext context, double width) {
+    final edge = stows.editorToolbarAlignment.value;
+    final anchor = _activeAnchor;
+    final box = anchor == null
+        ? null
+        : _anchorKeys[anchor]!.currentContext?.findRenderObject();
+
+    if (anchor != null && box is RenderBox && box.attached && box.hasSize) {
+      final screen = MediaQuery.sizeOf(context);
+      final center = box.localToGlobal(box.size.center(Offset.zero));
+      final link = _anchorLinks[anchor]!;
+
+      switch (edge) {
+        case AxisDirection.up || AxisDirection.down:
+          // Centered on the button, nudged back inside the screen.
+          final left = center.dx - width / 2;
+          final clamped = left.clamp(8.0, max(8.0, screen.width - width - 8));
+          final dx = clamped - left;
+          final under = edge == AxisDirection.up;
+          return (
+            link: link,
+            target: under ? Alignment.bottomCenter : Alignment.topCenter,
+            follower: under ? Alignment.topCenter : Alignment.bottomCenter,
+            offset: Offset(dx, under ? 6 : -6),
+          );
+        case AxisDirection.left || AxisDirection.right:
+          // Level with the button; grow upwards for buttons in the lower half
+          // so a tall popover doesn't run off the screen.
+          final lower = center.dy > screen.height / 2;
+          final onLeft = edge == AxisDirection.left;
+          return (
+            link: link,
+            target: switch ((onLeft, lower)) {
+              (true, false) => Alignment.topRight,
+              (true, true) => Alignment.bottomRight,
+              (false, false) => Alignment.topLeft,
+              (false, true) => Alignment.bottomLeft,
+            },
+            follower: switch ((onLeft, lower)) {
+              (true, false) => Alignment.topLeft,
+              (true, true) => Alignment.bottomLeft,
+              (false, false) => Alignment.topRight,
+              (false, true) => Alignment.bottomRight,
+            },
+            // also clears the toolbar's own padding
+            offset: Offset(onLeft ? 14 : -14, 0),
+          );
+      }
+    }
+
+    final (target, follower, offset) = switch (edge) {
+      AxisDirection.down => (
+        Alignment.topLeft,
+        Alignment.bottomLeft,
+        const Offset(8, -6),
+      ),
+      AxisDirection.up => (
+        Alignment.bottomLeft,
+        Alignment.topLeft,
+        const Offset(8, 6),
+      ),
+      AxisDirection.left => (
+        Alignment.topRight,
+        Alignment.topLeft,
+        const Offset(6, 8),
+      ),
+      AxisDirection.right => (
+        Alignment.topLeft,
+        Alignment.topRight,
+        const Offset(-6, 8),
+      ),
+    };
+    return (
+      link: _optionsLink,
+      target: target,
+      follower: follower,
+      offset: offset,
+    );
+  }
+
   static bool _isToolPopover(ToolOptions type) => switch (type) {
     ToolOptions.pen ||
     ToolOptions.highlighter ||
@@ -459,41 +568,16 @@ class _ToolbarState extends State<Toolbar> {
         final popover = _buildPopover(context, width);
         if (popover == null) return const SizedBox.shrink();
 
-        final (
-          targetAnchor,
-          followerAnchor,
-          offset,
-        ) = switch (stows.editorToolbarAlignment.value) {
-          AxisDirection.down => (
-            Alignment.topLeft,
-            Alignment.bottomLeft,
-            const Offset(8, -6),
-          ),
-          AxisDirection.up => (
-            Alignment.bottomLeft,
-            Alignment.topLeft,
-            const Offset(8, 6),
-          ),
-          AxisDirection.left => (
-            Alignment.topRight,
-            Alignment.topLeft,
-            const Offset(6, 8),
-          ),
-          AxisDirection.right => (
-            Alignment.topLeft,
-            Alignment.topRight,
-            const Offset(-6, 8),
-          ),
-        };
+        final placement = _placement(context, width);
 
         return Align(
           alignment: Alignment.topLeft,
           child: CompositedTransformFollower(
-            link: _optionsLink,
+            link: placement.link,
             showWhenUnlinked: false,
-            targetAnchor: targetAnchor,
-            followerAnchor: followerAnchor,
-            offset: offset,
+            targetAnchor: placement.target,
+            followerAnchor: placement.follower,
+            offset: placement.offset,
             child: TapRegion(
               groupId: _optionsTapGroup,
               // Tapping the page closes the popover but still draws.
@@ -745,6 +829,17 @@ class _ToolbarState extends State<Toolbar> {
       ToolbarItem.quickWidths: const [],
     };
 
+    // The buttons that open a popover mark where it should appear.
+    for (final (item, anchor) in [
+      (ToolbarItem.pen, _Anchor.pen),
+      (ToolbarItem.pencil, _Anchor.pencil),
+      (ToolbarItem.highlighter, _Anchor.highlighter),
+      (ToolbarItem.eraser, _Anchor.eraser),
+      (ToolbarItem.colorPalette, _Anchor.colors),
+    ]) {
+      items[item] = [for (final w in items[item]!) _anchored(anchor, w)];
+    }
+
     final bars = <Widget>[
       ValueListenableBuilder(
         valueListenable: showExportOptions,
@@ -899,5 +994,8 @@ class _ToolbarState extends State<Toolbar> {
     super.dispose();
   }
 }
+
+/// The toolbar buttons a popover can open from.
+enum _Anchor { pen, pencil, highlighter, eraser, colors }
 
 enum ToolOptions { hide, pen, highlighter, pencil, eraser, select }

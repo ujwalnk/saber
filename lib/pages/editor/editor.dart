@@ -659,14 +659,20 @@ class EditorState extends State<Editor> {
         if (newStroke.isEmpty) return;
 
         if (currentTool is! ShapePen) {
-          if (stows.autoStraightenHighlighterOnly.value) {
-            // Highlighter strokes are always straightened, whatever their
-            // length or shape. Pens and pencil are left exactly as drawn.
-            if (newStroke.toolId == .highlighter &&
-                newStroke.points.length >= 2 &&
+          final alwaysStraighten =
+              newStroke.toolId == .highlighter &&
+              (stows.straightenHighlighter.value ||
+                  stows.autoStraightenHighlighterOnly.value);
+          if (alwaysStraighten) {
+            // Highlighter strokes are straightened whatever their length or
+            // shape.
+            if (newStroke.points.length >= 2 &&
                 newStroke.points.first != newStroke.points.last) {
               newStroke.convertToLine();
             }
+          } else if (stows.autoStraightenHighlighterOnly.value) {
+            // Only highlighter lines are straightened: pens and pencil are
+            // left exactly as drawn.
           } else if (stows.autoStraightenLines.value &&
               newStroke.isStraightLine()) {
             newStroke.convertToLine();
