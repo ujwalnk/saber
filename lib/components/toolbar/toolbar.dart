@@ -12,7 +12,6 @@ import 'package:saber/components/toolbar/color_bar.dart';
 import 'package:saber/components/toolbar/eraser_modal.dart';
 import 'package:saber/components/toolbar/export_bar.dart';
 import 'package:saber/components/toolbar/pen_modal.dart';
-import 'package:saber/components/toolbar/selection_bar.dart';
 import 'package:saber/components/toolbar/size_picker.dart';
 import 'package:saber/components/toolbar/toolbar_button.dart';
 import 'package:saber/components/toolbar/toolbar_items.dart';
@@ -42,8 +41,6 @@ class Toolbar extends StatefulWidget {
     required this.toggleFingerDrawing,
     required this.pickPhoto,
     required this.paste,
-    required this.duplicateSelection,
-    required this.deleteSelection,
     required this.showExportOptions,
     required this.exportAsSba,
     required this.exportAsPdf,
@@ -66,8 +63,6 @@ class Toolbar extends StatefulWidget {
 
   final VoidCallback paste;
 
-  final VoidCallback duplicateSelection;
-  final VoidCallback deleteSelection;
 
   /// Whether the export bar is open. Opened from the editor's 3-dot menu.
   final ValueNotifier<bool> showExportOptions;
@@ -869,15 +864,11 @@ class _ToolbarState extends State<Toolbar> {
                 ? CollapsibleAxis.horizontal
                 : CollapsibleAxis.vertical,
             maintainState: true,
-            collapsed: toolOptionsType != ToolOptions.select,
-            child: switch (toolOptionsType) {
-              .select => SelectionBar(
-                duplicateSelection: widget.duplicateSelection,
-                deleteSelection: widget.deleteSelection,
-              ),
-              // pen, highlighter, pencil and eraser options are in the overlay
-              _ => const SizedBox.square(dimension: SizePicker.smallLength),
-            },
+            // The lasso selection menu is a popup next to the selection
+            // (see SelectionPopup), and pen, highlighter, pencil and eraser
+            // options are in the overlay, so there's nothing to show here.
+            collapsed: true,
+            child: const SizedBox.square(dimension: SizePicker.smallLength),
           );
         },
       ),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:collapsible/collapsible.dart';
 import 'package:file_picker/file_picker.dart';
@@ -31,6 +32,7 @@ import 'package:saber/components/theming/saber_theme.dart';
 import 'package:saber/components/toolbar/color_bar.dart';
 import 'package:saber/components/toolbar/editor_bottom_sheet.dart';
 import 'package:saber/components/toolbar/editor_page_manager.dart';
+import 'package:saber/components/toolbar/selection_popup.dart';
 import 'package:saber/components/toolbar/toolbar.dart';
 import 'package:saber/data/editor/editor_core_info.dart';
 import 'package:saber/data/editor/editor_exporter.dart';
@@ -189,6 +191,7 @@ class EditorState extends State<Editor> {
   @override
   void initState() {
     DynamicMaterialApp.addFullscreenListener(_setState);
+    _transformationController.addListener(_onTransformationChangedForPopup);
 
     _initAsync();
     _assignKeybindings();
@@ -1426,6 +1429,247 @@ class EditorState extends State<Editor> {
     }
   }
 
+  void duplicateSelection() {
+    final select = currentTool as Select;
+    if (!select.doneSelecting) return;
+
+    setState(() {
+      final page = coreInfo.pages[select.selectResult.pageIndex];
+      final strokes = select.selectResult.strokes;
+      final images = select.selectResult.images;
+
+      const duplicationFeedbackOffset = Offset(25, -25);
+
+      final duplicatedStrokes = strokes.map((stroke) {
+        return stroke.copy()..shift(duplicationFeedbackOffset);
+      }).toList();
+
+      final duplicatedImages = images.map((image) {
+        return image.copy()
+          ..id = coreInfo.nextImageId++
+          ..dstRect.shift(duplicationFeedbackOffset);
+      }).toList();
+
+      page.strokes.addAll(duplicatedStrokes);
+      page.images.addAll(duplicatedImages);
+
+      select.selectResult = select.selectResult.copyWith(
+        strokes: duplicatedStrokes,
+        images: duplicatedImages,
+        path: select.selectResult.path.shift(
+          duplicationFeedbackOffset,
+        ),
+      );
+
+      history.recordChange(
+        EditorHistoryItem(
+          type: .draw,
+          pageIndex: select.selectResult.pageIndex,
+          strokes: duplicatedStrokes,
+          images: duplicatedImages,
+        ),
+      );
+      autosaveAfterDelay();
+    });
+
+  }
+
+  void deleteSelection() {
+    final select = currentTool as Select;
+    if (!select.doneSelecting) {
+      return;
+    }
+
+    setState(() {
+      final page = coreInfo.pages[select.selectResult.pageIndex];
+      final strokes = select.selectResult.strokes;
+      final images = select.selectResult.images;
+
+      for (final stroke in strokes) {
+        page.strokes.remove(stroke);
+      }
+      for (final image in images) {
+        page.images.remove(image);
+      }
+
+      select.unselect();
+
+      history.recordChange(
+        EditorHistoryItem(
+          type: .erase,
+          pageIndex: strokes.first.pageIndex,
+          strokes: strokes,
+          images: images,
+        ),
+      );
+      autosaveAfterDelay();
+    });
+  }
+
+  /// Copies the lasso selection to the clipboard as a (transparent) PNG,
+  /// cropped to the selected strokes and images.
+  Future<void> copySelection() async {
+    final select = currentTool;
+    if (select is! Select || !select.doneSelecting) return;
+    final result = select.selectResult;
+    if (result.isEmpty) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(t.editor.selectionBar.copyFailed)),
+      );
+      return;
+    }
+
+    // Snapshot, since the selection can change while we render.
+    final strokes = result.strokes.toList();
+    final images = result.images.toList();
+    final pageSize = coreInfo.pages[result.pageIndex].size;
+
+    Rect? bounds;
+    for (final stroke in strokes) {
+      final box = stroke.boundingBox.inflate(stroke.options.size);
+      bounds = bounds == null ? box : bounds.expandToInclude(box);
+    }
+    for (final image in images) {
+      bounds = bounds == null
+          ? image.dstRect
+          : bounds.expandToInclude(image.dstRect);
+    }
+    if (bounds == null) return;
+    bounds = bounds.inflate(8).intersect(Offset.zero & pageSize);
+    if (bounds.isEmpty) return;
+
+    ui.Image? fullPage;
+    ui.Image? cropped;
+    try {
+      // Render only the selected items on an otherwise empty page, with no
+      // background, so the pasted image is just what was selected.
+      final tempPage = EditorPage(
+        size: pageSize,
+        strokes: strokes,
+        images: images,
+      );
+      final tempCoreInfo = coreInfo.copyWith(
+        backgroundColor: Colors.transparent,
+        backgroundPattern: .none,
+        pages: [tempPage],
+      );
+
+      const maxRasterizableSize = 3000.0;
+      final pixelRatio = (maxRasterizableSize / pageSize.longestSide)
+          .clamp(0.5, 2.0)
+          .toDouble();
+
+      fullPage = await EditorExporter.screenshotPage(
+        coreInfo: tempCoreInfo,
+        pageIndex: 0,
+        rasterizeAllStrokes: true,
+        pixelRatio: pixelRatio,
+      );
+
+      final src = Rect.fromLTRB(
+        bounds.left * pixelRatio,
+        bounds.top * pixelRatio,
+        bounds.right * pixelRatio,
+        bounds.bottom * pixelRatio,
+      );
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      final dst = Offset.zero & src.size;
+      canvas.drawImageRect(fullPage, src, dst, Paint());
+      final picture = recorder.endRecording();
+      cropped = await picture.toImage(
+        dst.width.ceil().clamp(1, 1 << 14).toInt(),
+        dst.height.ceil().clamp(1, 1 << 14).toInt(),
+      );
+      picture.dispose();
+
+      final byteData = await cropped.toByteData(format: .png);
+      if (byteData == null) throw StateError('Could not encode selection');
+
+      final item = DataWriterItem();
+      item.add(Formats.png(byteData.buffer.asUint8List()));
+      await clipboard.write([item]);
+
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(t.editor.selectionBar.copied)),
+      );
+    } catch (e, st) {
+      log.severe('Failed to copy selection', e, st);
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(t.editor.selectionBar.copyFailed)),
+      );
+    } finally {
+      fullPage?.dispose();
+      cropped?.dispose();
+    }
+  }
+
+  // --- floating menu for the lasso selection ---
+
+  /// True while the canvas is being panned/zoomed, so the popup doesn't lag
+  /// a frame behind the selection it's attached to.
+  final ValueNotifier<bool> _selectionPopupSuppressed = ValueNotifier(false);
+  Timer? _selectionPopupResumeTimer;
+  Matrix4? _lastPopupTransform;
+
+  void _onTransformationChangedForPopup() {
+    final current = _transformationController.value;
+    if (_lastPopupTransform != null && _lastPopupTransform == current) return;
+    _lastPopupTransform = current.clone();
+
+    if (currentTool is! Select) return;
+    _selectionPopupSuppressed.value = true;
+    _selectionPopupResumeTimer?.cancel();
+    _selectionPopupResumeTimer = Timer(const Duration(milliseconds: 150), () {
+      _selectionPopupSuppressed.value = false;
+    });
+  }
+
+  final _canvasAreaKey = GlobalKey();
+
+  /// The popup that sits next to the lasso selection, or null if there's
+  /// nothing selected (or the selection isn't on screen).
+  Widget? _buildSelectionPopup() {
+    final tool = currentTool;
+    if (tool is! Select || !tool.doneSelecting) return null;
+    if (tool.selectResult.isEmpty) return null;
+    if (_selectionPopupSuppressed.value) return null;
+
+    final pageIndex = tool.selectResult.pageIndex;
+    if (pageIndex < 0 || pageIndex >= coreInfo.pages.length) return null;
+
+    final pageBox = coreInfo.pages[pageIndex].renderBox;
+    final areaBox = _canvasAreaKey.currentContext?.findRenderObject();
+    if (pageBox == null ||
+        !pageBox.attached ||
+        areaBox is! RenderBox ||
+        !areaBox.attached) {
+      return null;
+    }
+
+    final pageToArea = pageBox.getTransformTo(areaBox);
+    final selectionRect = MatrixUtils.transformRect(
+      pageToArea,
+      tool.selectResult.path.getBounds(),
+    );
+
+    // Hide the menu if the selection is scrolled completely out of view.
+    if (!selectionRect.overlaps(Offset.zero & areaBox.size)) return null;
+
+    return SelectionPopup(
+      selectionRect: selectionRect,
+      duplicateSelection: duplicateSelection,
+      copySelection: copySelection,
+      deleteSelection: deleteSelection,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.of(context);
@@ -1469,6 +1713,7 @@ class EditorState extends State<Editor> {
 
     // The circle showing the eraser's area of effect is drawn over the canvas.
     final Widget canvasArea = Stack(
+      key: _canvasAreaKey,
       fit: StackFit.expand,
       children: [
         MouseRegion(
@@ -1490,6 +1735,15 @@ class EditorState extends State<Editor> {
                 pointer: _eraserPointer,
                 radiusAt: _eraserRadiusOnScreen,
               ),
+            ),
+          ),
+        if (currentTool is Select)
+          Positioned.fill(
+            child: ValueListenableBuilder(
+              valueListenable: _selectionPopupSuppressed,
+              builder: (context, _, _) {
+                return _buildSelectionPopup() ?? const SizedBox.shrink();
+              },
             ),
           ),
       ],
@@ -1539,80 +1793,6 @@ class EditorState extends State<Editor> {
               if (mounted) setState(() {});
             },
             currentTool: currentTool,
-            duplicateSelection: () {
-              final select = currentTool as Select;
-              if (!select.doneSelecting) return;
-
-              setState(() {
-                final page = coreInfo.pages[select.selectResult.pageIndex];
-                final strokes = select.selectResult.strokes;
-                final images = select.selectResult.images;
-
-                const duplicationFeedbackOffset = Offset(25, -25);
-
-                final duplicatedStrokes = strokes.map((stroke) {
-                  return stroke.copy()..shift(duplicationFeedbackOffset);
-                }).toList();
-
-                final duplicatedImages = images.map((image) {
-                  return image.copy()
-                    ..id = coreInfo.nextImageId++
-                    ..dstRect.shift(duplicationFeedbackOffset);
-                }).toList();
-
-                page.strokes.addAll(duplicatedStrokes);
-                page.images.addAll(duplicatedImages);
-
-                select.selectResult = select.selectResult.copyWith(
-                  strokes: duplicatedStrokes,
-                  images: duplicatedImages,
-                  path: select.selectResult.path.shift(
-                    duplicationFeedbackOffset,
-                  ),
-                );
-
-                history.recordChange(
-                  EditorHistoryItem(
-                    type: .draw,
-                    pageIndex: select.selectResult.pageIndex,
-                    strokes: duplicatedStrokes,
-                    images: duplicatedImages,
-                  ),
-                );
-                autosaveAfterDelay();
-              });
-            },
-            deleteSelection: () {
-              final select = currentTool as Select;
-              if (!select.doneSelecting) {
-                return;
-              }
-
-              setState(() {
-                final page = coreInfo.pages[select.selectResult.pageIndex];
-                final strokes = select.selectResult.strokes;
-                final images = select.selectResult.images;
-
-                for (final stroke in strokes) {
-                  page.strokes.remove(stroke);
-                }
-                for (final image in images) {
-                  page.images.remove(image);
-                }
-
-                select.unselect();
-
-                history.recordChange(
-                  EditorHistoryItem(
-                    type: .erase,
-                    pageIndex: strokes.first.pageIndex,
-                    strokes: strokes,
-                    images: images,
-                  ),
-                );
-                autosaveAfterDelay();
-              });
-            },
             setColor: (color) {
               setState(() {
                 updateColorBar(color);
@@ -2282,6 +2462,9 @@ class EditorState extends State<Editor> {
     unawaited(_cleanUpAsync());
 
     DynamicMaterialApp.removeFullscreenListener(_setState);
+    _transformationController.removeListener(_onTransformationChangedForPopup);
+    _selectionPopupResumeTimer?.cancel();
+    _selectionPopupSuppressed.dispose();
 
     _delayedSaveTimer?.cancel();
     _watchServerTimer?.cancel();
