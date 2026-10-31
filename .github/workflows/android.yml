@@ -15,7 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        foss: [false, true]
+        # FOSS variant disabled: patches/pre/pubspec-fdroid.lock.patch no longer
+        # applies to this fork's pubspec.lock. Add `true` back once it's regenerated.
+        foss: [false]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -68,8 +70,21 @@ jobs:
           echo "keyAlias=$ALIAS" >> android/key.properties
           echo "storeFile=../android.keystore" >> android/key.properties
 
+      # Gradle asks for a JetBrains JDK 21 toolchain. The runner only ships
+      # other vendors and no download repository is configured, so install it
+      # here and register it with Gradle.
+      - name: Install JetBrains JDK 21
+        id: jbr
+        uses: actions/setup-java@v4
+        with:
+          distribution: jetbrains
+          java-version: "21"
+
       - name: Setup Android build tools
         run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.java.installations.paths=${{ steps.jbr.outputs.path }}" >> ~/.gradle/gradle.properties
+
           ANDROID_NDK=/usr/local/lib/android/sdk/ndk/29.0.14206865
           echo "ANDROID_NDK=$ANDROID_NDK" >> $GITHUB_ENV
           echo "ANDROID_NDK_HOME=$ANDROID_NDK" >> $GITHUB_ENV
