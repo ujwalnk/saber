@@ -55,9 +55,11 @@ jobs:
             ${{ runner.OS }}-${{ matrix.arch.cache-name }}-
 
       - name: Setup Flutter
-        uses: adil192/setup-flutter-submodule@v3
+        uses: subosito/flutter-action@v2
         with:
-          flutter-path: submodules/flutter
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
 
       - name: Disable Flutter CLI animations
         run: flutter config --no-cli-animations
