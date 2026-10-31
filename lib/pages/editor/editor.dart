@@ -29,6 +29,7 @@ import 'package:saber/components/theming/adaptive_alert_dialog.dart';
 import 'package:saber/components/theming/adaptive_icon.dart';
 import 'package:saber/components/theming/dynamic_material_app.dart';
 import 'package:saber/components/theming/saber_theme.dart';
+import 'package:saber/components/toolbar/samsung_panel.dart';
 import 'package:saber/components/toolbar/selection_popup.dart';
 import 'package:saber/components/toolbar/color_bar.dart';
 import 'package:saber/components/toolbar/editor_bottom_sheet.dart';
@@ -58,6 +59,10 @@ import 'package:sbn/change.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 
 typedef _PhotoInfo = ({Uint8List bytes, String extension});
+
+/// Where a paste should go: the page, and the position on that page
+/// (in page coordinates).
+typedef _PasteTarget = ({int pageIndex, Offset position});
 
 class Editor extends StatefulWidget {
   new({super.key, String? path, this.customTitle, this.pdfPath})
@@ -195,6 +200,77 @@ class EditorState extends State<Editor> {
   /// Selection bounds in canvas-area coordinates; null when no selection
   /// should display the popup.
   final ValueNotifier<Rect?> _selectionPopupRect = ValueNotifier(null);
+
+  /// Where the long-press "Paste" button is shown, in canvas-area
+  /// coordinates, or null when it is hidden.
+  final ValueNotifier<Offset?> _pasteMenuPosition = ValueNotifier(null);
+
+  /// The page and position under the long press that opened the paste menu.
+  _PasteTarget? _pasteTarget;
+  Timer? _longPressTimer;
+  Offset? _longPressStart;
+  int _pointersDown = 0;
+
+  static const _longPressDuration = Duration(milliseconds: 500);
+  static const _longPressSlop = 18.0;
+
+  /// A finger can long press (unless it is currently drawing or erasing);
+  /// a stylus (or mouse) only can while the lasso tool is selected.
+  bool _canLongPressToPaste(PointerDeviceKind kind) {
+    final tool = currentTool;
+    if (tool == Tool.textEditing) return false;
+    if (kind == PointerDeviceKind.touch) {
+      final fingerIsDrawing = stows.editorFingerDrawing.value;
+      return !(fingerIsDrawing && (tool is Pen || tool is Eraser));
+    }
+    return tool is Select;
+  }
+
+  void _onCanvasPointerDown(PointerDownEvent event) {
+    _pasteMenuPosition.value = null;
+    _pointersDown++;
+    _longPressTimer?.cancel();
+    if (_pointersDown != 1 ||
+        coreInfo.readOnly ||
+        !_canLongPressToPaste(event.kind)) {
+      return;
+    }
+
+    _longPressStart = event.position;
+    _longPressTimer = Timer(_longPressDuration, () {
+      final start = _longPressStart;
+      final canvasBox = _canvasAreaKey.currentContext?.findRenderObject();
+      if (!mounted ||
+          start == null ||
+          canvasBox is! RenderBox ||
+          !canvasBox.attached) {
+        return;
+      }
+      _pasteTarget = _pasteTargetAt(start);
+      _pasteMenuPosition.value = canvasBox.globalToLocal(start);
+    });
+  }
+
+  _PasteTarget? _pasteTargetAt(Offset globalPosition) {
+    final pageIndex = onWhichPageIsFocalPoint(globalPosition);
+    if (pageIndex == null) return null;
+    final box = coreInfo.pages[pageIndex].renderBox;
+    if (box == null || !box.attached) return null;
+    return (pageIndex: pageIndex, position: box.globalToLocal(globalPosition));
+  }
+
+  void _onCanvasPointerMove(PointerMoveEvent event) {
+    final start = _longPressStart;
+    if (start == null) return;
+    if ((event.position - start).distance > _longPressSlop) {
+      _longPressTimer?.cancel();
+    }
+  }
+
+  void _onCanvasPointerEnd(PointerEvent event) {
+    if (_pointersDown > 0) _pointersDown--;
+    _longPressTimer?.cancel();
+  }
 
   /// A private in-app clipboard for copied lasso selections.
   /// The normal system clipboard continues to be used for copied images.
@@ -340,12 +416,17 @@ class EditorState extends State<Editor> {
   /// Pastes the in-app copied selection onto the currently focused page.
   /// Returns false when the in-app clipboard is empty so the caller can fall
   /// back to the operating-system clipboard for images.
-  bool _pasteCopiedSelection() {
+  bool _pasteCopiedSelection([_PasteTarget? target]) {
     final copied = _copiedSelection;
     if (copied == null || coreInfo.readOnly) return false;
 
-    final pageIndex = currentPageIndex;
-    const offset = Offset(25, -25);
+    final pageIndex = target?.pageIndex ?? currentPageIndex;
+    var offset = const Offset(25, -25);
+    if (target != null) {
+      // center the pasted selection on the long press
+      final bounds = copied.path.getBounds();
+      if (!bounds.isEmpty) offset = target.position - bounds.center;
+    }
     final strokes = (copied.strokes as List<Stroke>).map((stroke) {
       return stroke.copy()
         ..pageIndex = pageIndex
@@ -1451,10 +1532,13 @@ class EditorState extends State<Editor> {
   /// Returns the number of photos picked.
   ///
   /// If [photoInfos] is provided, it will be used instead of the file picker.
-  Future<int> _pickPhotos([List<_PhotoInfo>? photoInfos]) async {
+  Future<int> _pickPhotos([
+    List<_PhotoInfo>? photoInfos,
+    _PasteTarget? target,
+  ]) async {
     if (coreInfo.readOnly) return 0;
 
-    final currentPageIndex = this.currentPageIndex;
+    final currentPageIndex = target?.pageIndex ?? this.currentPageIndex;
 
     photoInfos ??= await _pickPhotosWithFilePicker();
     if (photoInfos.isEmpty) return 0;
@@ -1502,9 +1586,36 @@ class EditorState extends State<Editor> {
     );
     createPage(currentPageIndex);
     coreInfo.pages[currentPageIndex].images.addAll(images);
+    if (target != null) {
+      for (final image in images) {
+        _centerImageOnceLoaded(image, target.position);
+      }
+    }
     autosaveAfterDelay();
 
     return images.length;
+  }
+
+  /// An image only gets its real size once it has loaded, so wait for that
+  /// and then center it on [center] (keeping it inside its page).
+  void _centerImageOnceLoaded(EditorImage image, Offset center) {
+    void listener() {
+      final size = image.dstRect.size;
+      // not loaded yet (the real size is set when it loads)
+      if (size.isEmpty) return;
+      image.removeListener(listener);
+
+      final pageSize = coreInfo.pages[image.pageIndex].size;
+      final left = (center.dx - size.width / 2)
+          .clamp(0.0, max(0.0, pageSize.width - size.width))
+          .toDouble();
+      final top = (center.dy - size.height / 2)
+          .clamp(0.0, max(0.0, pageSize.height - size.height))
+          .toDouble();
+      image.dstRect = Offset(left, top) & size;
+    }
+
+    image.addListener(listener);
   }
 
   Future<List<_PhotoInfo>> _pickPhotosWithFilePicker() async {
@@ -1610,8 +1721,8 @@ class EditorState extends State<Editor> {
     return true;
   }
 
-  Future paste() async {
-    if (_pasteCopiedSelection()) return;
+  Future paste({_PasteTarget? target}) async {
+    if (_pasteCopiedSelection(target)) return;
 
     /// Maps image formats to their file extension.
     const Map<SimpleFileFormat, String> formats = {
@@ -1644,9 +1755,13 @@ class EditorState extends State<Editor> {
           return;
         }
 
-        String extension;
-        if (file.fileName != null) {
-          extension = file.fileName!.substring(file.fileName!.lastIndexOf('.'));
+        // On Android the clipboard's file name often has no extension,
+        // so fall back to the one for the clipboard format.
+        final fileName = file.fileName;
+        final dot = fileName?.lastIndexOf('.') ?? -1;
+        final String extension;
+        if (fileName != null && dot > 0 && dot < fileName.length - 1) {
+          extension = fileName.substring(dot);
         } else {
           extension = formats[format]!;
         }
@@ -1659,12 +1774,45 @@ class EditorState extends State<Editor> {
       if (progress != null) progresses.add(progress);
     }
 
-    while (progresses.isNotEmpty) {
+    // Don't wait forever if the clipboard provider never finishes.
+    final deadline = DateTime.now().add(const Duration(seconds: 15));
+    while (progresses.isNotEmpty && DateTime.now().isBefore(deadline)) {
       progresses.removeWhere((progress) => progress.fraction.value == 1);
       await Future.delayed(const Duration(milliseconds: 50));
     }
 
-    await _pickPhotos(photoInfos);
+    if (photoInfos.isNotEmpty) {
+      await _pickPhotos(photoInfos, target);
+      return;
+    }
+
+    // No image on the clipboard: paste text into the current page's text.
+    if (reader.canProvide(Formats.plainText)) {
+      final text = await reader.readValue(Formats.plainText);
+      if (text == null || text.isEmpty) return;
+      _pasteText(text, target?.pageIndex);
+    }
+  }
+
+  /// Inserts [text] into the current page's text layer at the cursor
+  /// (or at the end if the cursor hasn't been placed yet).
+  void _pasteText(String text, [int? pageIndex]) {
+    if (coreInfo.readOnly) return;
+    final controller =
+        coreInfo.pages[pageIndex ?? currentPageIndex].quill.controller;
+    final length = controller.document.length - 1; // excludes trailing '\n'
+    final selection = controller.selection;
+    final start = selection.isValid ? selection.start.clamp(0, length) : length;
+    final end = selection.isValid ? selection.end.clamp(0, length) : length;
+    setState(() {
+      controller.replaceText(
+        start,
+        end - start,
+        text,
+        TextSelection.collapsed(offset: start + text.length),
+      );
+    });
+    autosaveAfterDelay();
   }
 
   Future exportAsPdf(BuildContext context) async {
@@ -1895,12 +2043,19 @@ class EditorState extends State<Editor> {
           onExit: (_) => _eraserCircle.value = null,
           child: Listener(
             behavior: HitTestBehavior.translucent,
-            onPointerDown: _updateEraserCircle,
-            onPointerMove: _updateEraserCircle,
-            onPointerHover: _updateEraserCircle,
-            onPointerUp: _onEraserPointerUp,
-            onPointerCancel: _onEraserPointerUp,
-            child: canvas,
+            onPointerDown: _onCanvasPointerDown,
+            onPointerMove: _onCanvasPointerMove,
+            onPointerUp: _onCanvasPointerEnd,
+            onPointerCancel: _onCanvasPointerEnd,
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: _updateEraserCircle,
+              onPointerMove: _updateEraserCircle,
+              onPointerHover: _updateEraserCircle,
+              onPointerUp: _onEraserPointerUp,
+              onPointerCancel: _onEraserPointerUp,
+              child: canvas,
+            ),
           ),
         ),
         if (isEraser)
@@ -1953,6 +2108,43 @@ class EditorState extends State<Editor> {
               duplicateSelection: _duplicateSelection,
               copySelection: _copySelection,
               deleteSelection: _deleteSelection,
+            );
+          },
+        ),
+        ValueListenableBuilder<Offset?>(
+          valueListenable: _pasteMenuPosition,
+          builder: (context, position, _) {
+            if (position == null || coreInfo.readOnly) {
+              return const SizedBox.shrink();
+            }
+            return CustomSingleChildLayout(
+              delegate: _PasteMenuLayoutDelegate(position),
+              child: SamsungPanel(
+                borderRadius: 14,
+                padding: const EdgeInsets.all(6),
+                child: TextButton(
+                  onPressed: () {
+                    final target = _pasteTarget;
+                    _pasteMenuPosition.value = null;
+                    _pasteTarget = null;
+                    paste(target: target);
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: colorScheme.onSurface,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 9,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                    ),
+                    textStyle: const TextStyle(fontSize: 13),
+                  ),
+                  child: const Text('Paste'),
+                ),
+              ),
             );
           },
         ),
@@ -2533,6 +2725,8 @@ class EditorState extends State<Editor> {
     showExportOptions.dispose();
     _eraserCircle.dispose();
     _selectionPopupRect.dispose();
+    _longPressTimer?.cancel();
+    _pasteMenuPosition.dispose();
   }
 
   Future<void> _cleanUpAsync() async {
@@ -2547,4 +2741,34 @@ class EditorState extends State<Editor> {
       coreInfo.dispose();
     }
   }
+}
+
+/// Places the long-press "Paste" button just above the pressed point
+/// (or below it if there isn't room), never off the sides.
+class _PasteMenuLayoutDelegate extends SingleChildLayoutDelegate {
+  const _PasteMenuLayoutDelegate(this.anchor);
+
+  final Offset anchor;
+
+  static const _gap = 28.0;
+  static const _margin = 8.0;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      constraints.loosen();
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final maxX = size.width - childSize.width - _margin;
+    final x = (anchor.dx - childSize.width / 2)
+        .clamp(_margin, maxX < _margin ? _margin : maxX)
+        .toDouble();
+    final above = anchor.dy - _gap - childSize.height;
+    final y = above >= _margin ? above : anchor.dy + _gap;
+    return Offset(x, y);
+  }
+
+  @override
+  bool shouldRelayout(_PasteMenuLayoutDelegate oldDelegate) =>
+      oldDelegate.anchor != anchor;
 }
