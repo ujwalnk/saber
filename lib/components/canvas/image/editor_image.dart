@@ -88,6 +88,13 @@ sealed class EditorImage extends ChangeNotifier {
   /// Whether this image is inverted if Prefs.editorAutoInvert.value
   bool invertible;
 
+  /// Clockwise rotation in radians, around the center of [dstRect].
+  double rotation = 0;
+
+  /// Whether this image is drawn on top of the page's strokes
+  /// instead of underneath them.
+  bool aboveStrokes = false;
+
   /// The BoxFit used if this is a page's background image
   BoxFit backgroundFit;
 
@@ -119,8 +126,9 @@ sealed class EditorImage extends ChangeNotifier {
     required AssetCache assetCache,
   }) {
     final extension = json['e'] as String?;
+    final EditorImage image;
     if (extension == '.svg') {
-      return SvgEditorImage.fromJson(
+      image = SvgEditorImage.fromJson(
         json,
         inlineAssets: inlineAssets,
         isThumbnail: isThumbnail,
@@ -128,7 +136,7 @@ sealed class EditorImage extends ChangeNotifier {
         assetCache: assetCache,
       );
     } else if (extension == '.pdf') {
-      return PdfEditorImage.fromJson(
+      image = PdfEditorImage.fromJson(
         json,
         inlineAssets: inlineAssets,
         isThumbnail: isThumbnail,
@@ -136,7 +144,7 @@ sealed class EditorImage extends ChangeNotifier {
         assetCache: assetCache,
       );
     } else {
-      return PngEditorImage.fromJson(
+      image = PngEditorImage.fromJson(
         json,
         inlineAssets: inlineAssets,
         isThumbnail: isThumbnail,
@@ -144,6 +152,9 @@ sealed class EditorImage extends ChangeNotifier {
         assetCache: assetCache,
       );
     }
+    image.rotation = (json['r'] as num?)?.toDouble() ?? 0;
+    image.aboveStrokes = json['ab'] == true;
+    return image;
   }
 
   @mustBeOverridden
@@ -158,6 +169,8 @@ sealed class EditorImage extends ChangeNotifier {
     'y': dstRect.top,
     'w': dstRect.width,
     'h': dstRect.height,
+    if (rotation != 0) 'r': rotation,
+    if (aboveStrokes) 'ab': true,
     if (srcRect.left != 0) 'sx': srcRect.left,
     if (srcRect.top != 0) 'sy': srcRect.top,
     if (srcRect.width != 0) 'sw': srcRect.width,

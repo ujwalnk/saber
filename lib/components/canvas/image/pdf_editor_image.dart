@@ -185,25 +185,28 @@ class PdfEditorImage extends EditorImage {
   }
 
   @override
-  PdfEditorImage copy() => PdfEditorImage(
-    id: id,
-    assetCache: assetCache,
-    pdfBytes: pdfBytes,
-    pdfPage: pdfPage,
-    pdfFile: pdfFile,
-    pageIndex: pageIndex,
-    pageSize: .infinite,
-    invertible: invertible,
-    backgroundFit: backgroundFit,
-    onMoveImage: onMoveImage,
-    onDeleteImage: onDeleteImage,
-    onMiscChange: onMiscChange,
-    onLoad: onLoad,
-    newImage: true,
-    dstRect: dstRect,
-    naturalSize: naturalSize,
-    isThumbnail: isThumbnail,
-  );
+  PdfEditorImage copy() =>
+      PdfEditorImage(
+          id: id,
+          assetCache: assetCache,
+          pdfBytes: pdfBytes,
+          pdfPage: pdfPage,
+          pdfFile: pdfFile,
+          pageIndex: pageIndex,
+          pageSize: .infinite,
+          invertible: invertible,
+          backgroundFit: backgroundFit,
+          onMoveImage: onMoveImage,
+          onDeleteImage: onDeleteImage,
+          onMiscChange: onMiscChange,
+          onLoad: onLoad,
+          newImage: true,
+          dstRect: dstRect,
+          naturalSize: naturalSize,
+          isThumbnail: isThumbnail,
+        )
+        ..rotation = rotation
+        ..aboveStrokes = aboveStrokes;
 
   @override
   void dispose() {

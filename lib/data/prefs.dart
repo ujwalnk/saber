@@ -52,6 +52,13 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// The folder the sticker picker lists PNG / JPEG / GIF images from.
+  final stickerDirectory = PlainStow<String?>(
+    'stickerDirectory',
+    null,
+    volatile: !_isOnMainIsolate,
+  );
+
   final allowInsecureConnections = SecureStow.bool(
     'allowInsecureConnections',
     false,

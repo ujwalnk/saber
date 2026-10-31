@@ -45,6 +45,15 @@ class CanvasImage extends StatefulHookWidget {
   State<CanvasImage> createState() => _CanvasImageState();
 }
 
+/// Converts a movement measured inside an image that is rotated by [angle]
+/// into a movement on the page.
+Offset _rotateOffset(Offset offset, double angle) {
+  if (angle == 0) return offset;
+  final c = cos(angle);
+  final s = sin(angle);
+  return Offset(offset.dx * c - offset.dy * s, offset.dx * s + offset.dy * c);
+}
+
 class _CanvasImageState extends State<CanvasImage> {
   var _active = false;
 
@@ -130,18 +139,22 @@ class _CanvasImageState extends State<CanvasImage> {
               onPanUpdate: active
                   ? (details) {
                       setState(() {
+                        final delta = _rotateOffset(
+                          details.delta,
+                          widget.image.rotation,
+                        );
                         final fivePercent = min(
                           widget.pageSize.width * 0.05,
                           widget.pageSize.height * 0.05,
                         );
                         widget.image.dstRect = .fromLTWH(
-                          (widget.image.dstRect.left + details.delta.dx)
+                          (widget.image.dstRect.left + delta.dx)
                               .clamp(
                                 fivePercent - widget.image.dstRect.width,
                                 widget.pageSize.width - fivePercent,
                               )
                               .toDouble(),
-                          (widget.image.dstRect.top + details.delta.dy)
+                          (widget.image.dstRect.top + delta.dy)
                               .clamp(
                                 fivePercent - widget.image.dstRect.height,
                                 widget.pageSize.height - fivePercent,
@@ -246,7 +259,9 @@ class _CanvasImageState extends State<CanvasImage> {
       width: max(widget.image.dstRect.width, CanvasImage.minInteractiveSize),
       height: max(widget.image.dstRect.height, CanvasImage.minInteractiveSize),
 
-      child: unpositioned,
+      child: widget.image.rotation == 0
+          ? unpositioned
+          : Transform.rotate(angle: widget.image.rotation, child: unpositioned),
     );
   }
 

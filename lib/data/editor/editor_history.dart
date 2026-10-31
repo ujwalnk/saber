@@ -138,6 +138,9 @@ class EditorHistory {
   }
 }
 
+/// The page's images in drawing order, and whether each is above the strokes.
+typedef ImageLayers = List<({EditorImage image, bool above})>;
+
 class EditorHistoryItem {
   new({
     required this.type,
@@ -150,6 +153,7 @@ class EditorHistoryItem {
     this.quillChange,
     this.colorChange,
     this.backgroundPatternChange,
+    this.layerChange,
   }) : assert(
          type != .move || offset != null,
          'Offset must be provided for move',
@@ -177,6 +181,10 @@ class EditorHistoryItem {
        assert(
          type != .backgroundPattern || backgroundPatternChange != null,
          'Background pattern change must be provided for backgroundPattern',
+       ),
+       assert(
+         type != .layerChange || layerChange != null,
+         'Layer change must be provided for layerChange',
        );
 
   final EditorHistoryItemType type;
@@ -193,6 +201,7 @@ class EditorHistoryItem {
   final DocChange? quillChange;
   final Map<Stroke, Change<Color>>? colorChange;
   final Change<CanvasBackgroundPattern>? backgroundPatternChange;
+  final Change<ImageLayers>? layerChange;
 
   EditorHistoryItem copyWith({
     EditorHistoryItemType? type,
@@ -205,6 +214,7 @@ class EditorHistoryItem {
     DocChange? quillChange,
     Map<Stroke, Change<Color>>? colorChange,
     Change<CanvasBackgroundPattern>? backgroundPatternChange,
+    Change<ImageLayers>? layerChange,
   }) {
     return EditorHistoryItem(
       type: type ?? this.type,
@@ -218,6 +228,7 @@ class EditorHistoryItem {
       colorChange: colorChange ?? this.colorChange,
       backgroundPatternChange:
           backgroundPatternChange ?? this.backgroundPatternChange,
+      layerChange: layerChange ?? this.layerChange,
     );
   }
 }
@@ -232,4 +243,5 @@ enum EditorHistoryItemType {
   quillUndoneChange,
   changeColor,
   backgroundPattern,
+  layerChange,
 }

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' show max, min;
+import 'dart:math' show cos, max, min, sin;
 
 import 'package:collapsible/collapsible.dart';
 import 'package:file_picker/file_picker.dart';
@@ -30,6 +30,7 @@ import 'package:saber/components/theming/adaptive_icon.dart';
 import 'package:saber/components/theming/dynamic_material_app.dart';
 import 'package:saber/components/theming/saber_theme.dart';
 import 'package:saber/components/toolbar/samsung_panel.dart';
+import 'package:saber/components/toolbar/sticker_picker.dart';
 import 'package:saber/components/toolbar/selection_popup.dart';
 import 'package:saber/components/toolbar/color_bar.dart';
 import 'package:saber/components/toolbar/editor_bottom_sheet.dart';
@@ -424,17 +425,15 @@ class EditorState extends State<Editor> {
       result.strokes[i].applyTransform(_originalStrokes[i], transform);
     }
     for (var i = 0; i < result.images.length; i++) {
-      final original = _originalImages[i].dstRect;
-      result.images[i].dstRect = transform.angle == 0
-          ? Rect.fromPoints(
-              transform.apply(original.topLeft),
-              transform.apply(original.bottomRight),
-            )
-          : Rect.fromCenter(
-              center: transform.apply(original.center),
-              width: original.width,
-              height: original.height,
-            );
+      final original = _originalImages[i];
+      final rect = original.dstRect;
+      result.images[i]
+        ..rotation = original.rotation + transform.angle
+        ..dstRect = Rect.fromCenter(
+          center: transform.apply(rect.center),
+          width: rect.width * transform.scaleX.abs(),
+          height: rect.height * transform.scaleY.abs(),
+        );
     }
     result.path = _originalPath.transform(transform.matrix4);
     _handleMoved = true;
@@ -488,15 +487,214 @@ class EditorState extends State<Editor> {
           : bounds.expandToInclude(strokeBounds);
     }
     for (final image in result.images) {
+      final imageBounds = _imageBounds(image);
       bounds = bounds == null
-          ? image.dstRect
-          : bounds.expandToInclude(image.dstRect);
+          ? imageBounds
+          : bounds.expandToInclude(imageBounds);
     }
     if (bounds != null && !bounds.isEmpty) {
       result.path = Path()..addRect(bounds);
     }
 
     _updateSelectionPopupRect();
+    setState(() {});
+    autosaveAfterDelay();
+  }
+
+  /// The smallest page-coordinate rect that contains [image], rotation included.
+  Rect _imageBounds(EditorImage image) {
+    final rect = image.dstRect;
+    if (image.rotation == 0) return rect;
+    final c = cos(image.rotation);
+    final s = sin(image.rotation);
+    final center = rect.center;
+    final corners = [
+      for (final corner in [
+        rect.topLeft,
+        rect.topRight,
+        rect.bottomLeft,
+        rect.bottomRight,
+      ])
+        () {
+          final d = corner - center;
+          return center + Offset(d.dx * c - d.dy * s, d.dx * s + d.dy * c);
+        }(),
+    ];
+    return Rect.fromLTRB(
+      corners.map((p) => p.dx).reduce(min),
+      corners.map((p) => p.dy).reduce(min),
+      corners.map((p) => p.dx).reduce(max),
+      corners.map((p) => p.dy).reduce(max),
+    );
+  }
+
+  /// Picks a sticker in the app and drops it in the middle of the screen,
+  /// selected so it can be moved, resized and rotated right away.
+  Future<void> _pickSticker() async {
+    if (coreInfo.readOnly) return;
+
+    final file = await StickerPicker.show(context);
+    if (file == null || !mounted) return;
+
+    final Uint8List bytes;
+    try {
+      bytes = await file.readAsBytes();
+    } catch (_) {
+      return;
+    }
+    final name = file.path.toLowerCase();
+    final dot = name.lastIndexOf('.');
+    final extension = dot < 0 ? '.png' : name.substring(dot);
+
+    final canvasBox = _canvasAreaKey.currentContext?.findRenderObject();
+    _PasteTarget? target;
+    if (canvasBox is RenderBox && canvasBox.attached) {
+      target = _pasteTargetAt(
+        canvasBox.localToGlobal(canvasBox.size.center(Offset.zero)),
+      );
+    }
+
+    final pageIndex = target?.pageIndex ?? currentPageIndex;
+    final imageCountBefore = coreInfo.pages[pageIndex].images.length;
+    final added = await _pickPhotos([
+      (bytes: bytes, extension: extension),
+    ], target);
+    if (added == 0 || !mounted) return;
+
+    final images = coreInfo.pages[pageIndex].images;
+    if (images.length <= imageCountBefore) return;
+    final image = images.last;
+
+    // the selection frame replaces the image's own "just added" frame
+    image.newImage = false;
+    setTool(Select.currentSelect);
+    _selectImageWhenLoaded(image);
+  }
+
+  void _selectImageWhenLoaded(EditorImage image) {
+    void select() {
+      if (!mounted) return;
+      final tool = Select.currentSelect;
+      tool.selectResult = SelectResult(
+        pageIndex: image.pageIndex,
+        strokes: [],
+        images: [image],
+        path: Path()..addRect(_imageBounds(image)),
+      );
+      tool.doneSelecting = true;
+      _updateSelectionPopupRect();
+      setState(() {});
+    }
+
+    if (!image.dstRect.isEmpty) {
+      select();
+      return;
+    }
+
+    void listener() {
+      if (image.dstRect.isEmpty) return;
+      image.removeListener(listener);
+      // let the image finish centering itself first
+      WidgetsBinding.instance.addPostFrameCallback((_) => select());
+    }
+
+    image.addListener(listener);
+  }
+
+  /// Moves the selected images one layer up or down. Within a page the order
+  /// is: images below the strokes, the strokes, then images above the strokes.
+  void _moveImagesLayer(bool forward) {
+    final select = currentTool;
+    if (select is! Select || !select.doneSelecting || coreInfo.readOnly) {
+      return;
+    }
+    final result = select.selectResult;
+    if (result.images.isEmpty) return;
+
+    final page = coreInfo.pages[result.pageIndex];
+    final selected = result.images.toSet();
+
+    ImageLayers snapshot() => [
+      for (final image in page.images)
+        (image: image, above: image.aboveStrokes),
+    ];
+    final before = snapshot();
+
+    final below = [
+      for (final image in page.images)
+        if (!image.aboveStrokes) image,
+    ];
+    final above = [
+      for (final image in page.images)
+        if (image.aboveStrokes) image,
+    ];
+
+    void swapUp(List<EditorImage> layer) {
+      for (var i = layer.length - 2; i >= 0; i--) {
+        if (selected.contains(layer[i]) && !selected.contains(layer[i + 1])) {
+          final image = layer.removeAt(i);
+          layer.insert(i + 1, image);
+        }
+      }
+    }
+
+    void swapDown(List<EditorImage> layer) {
+      for (var i = 1; i < layer.length; i++) {
+        if (selected.contains(layer[i]) && !selected.contains(layer[i - 1])) {
+          final image = layer.removeAt(i);
+          layer.insert(i - 1, image);
+        }
+      }
+    }
+
+    if (forward) {
+      // selected images already on top of the lower layer cross over the strokes
+      final crossing = <EditorImage>[];
+      while (below.isNotEmpty && selected.contains(below.last)) {
+        crossing.insert(0, below.removeLast());
+      }
+      swapUp(below);
+      swapUp(above);
+      above.insertAll(0, crossing);
+    } else {
+      final crossing = <EditorImage>[];
+      while (above.isNotEmpty && selected.contains(above.first)) {
+        crossing.add(above.removeAt(0));
+      }
+      swapDown(above);
+      swapDown(below);
+      below.addAll(crossing);
+    }
+
+    for (final image in below) {
+      image.aboveStrokes = false;
+    }
+    for (final image in above) {
+      image.aboveStrokes = true;
+    }
+    page.images
+      ..clear()
+      ..addAll(below)
+      ..addAll(above);
+
+    final after = snapshot();
+    var changed = before.length != after.length;
+    for (var i = 0; !changed && i < before.length; i++) {
+      changed =
+          before[i].image != after[i].image ||
+          before[i].above != after[i].above;
+    }
+    if (!changed) return;
+
+    history.recordChange(
+      EditorHistoryItem(
+        type: .layerChange,
+        pageIndex: result.pageIndex,
+        strokes: const [],
+        images: const [],
+        layerChange: Change(previous: before, current: after),
+      ),
+    );
     setState(() {});
     autosaveAfterDelay();
   }
@@ -1072,6 +1270,16 @@ class EditorState extends State<Editor> {
 
         case .backgroundPattern:
           coreInfo.backgroundPattern = item.backgroundPatternChange!.previous;
+
+        case .layerChange:
+          final page = coreInfo.pages[item.pageIndex];
+          final layers = item.layerChange!.previous;
+          page.images
+            ..clear()
+            ..addAll([for (final layer in layers) layer.image]);
+          for (final layer in layers) {
+            layer.image.aboveStrokes = layer.above;
+          }
       }
 
       if (item.type != .move) {
@@ -1131,6 +1339,8 @@ class EditorState extends State<Editor> {
             ),
           ),
         );
+      case .layerChange:
+        undo(item.copyWith(layerChange: item.layerChange!.reverse()));
       case .backgroundPattern:
         undo(
           item.copyWith(
@@ -2334,6 +2544,7 @@ class EditorState extends State<Editor> {
               lastSeenPointerCount = 0;
             },
             pickPhoto: _pickPhotos,
+            pickSticker: _pickSticker,
             paste: paste,
             showExportOptions: showExportOptions,
             exportAsSba: exportAsSba,
@@ -2414,11 +2625,22 @@ class EditorState extends State<Editor> {
             if (selectionRect == null || coreInfo.readOnly) {
               return const SizedBox.shrink();
             }
+            final tool = currentTool;
+            final selectionHasImages =
+                tool is Select &&
+                tool.doneSelecting &&
+                tool.selectResult.images.isNotEmpty;
             return SelectionPopup(
               selectionRect: selectionRect,
               duplicateSelection: _duplicateSelection,
               copySelection: _copySelection,
               deleteSelection: _deleteSelection,
+              moveForward: selectionHasImages
+                  ? () => _moveImagesLayer(true)
+                  : null,
+              moveBackward: selectionHasImages
+                  ? () => _moveImagesLayer(false)
+                  : null,
             );
           },
         ),

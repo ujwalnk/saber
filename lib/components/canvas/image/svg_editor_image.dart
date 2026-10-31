@@ -190,24 +190,26 @@ class SvgEditorImage extends EditorImage {
   SvgEditorImage copy() {
     final svgData = _extractSvg();
     return SvgEditorImage(
-      id: id,
-      // ignore: deprecated_member_use_from_same_package
-      assetCache: assetCache,
-      svgString: svgData.string,
-      svgFile: svgData.file,
-      pageIndex: pageIndex,
-      pageSize: .infinite,
-      invertible: invertible,
-      backgroundFit: backgroundFit,
-      onMoveImage: onMoveImage,
-      onDeleteImage: onDeleteImage,
-      onMiscChange: onMiscChange,
-      onLoad: onLoad,
-      newImage: newImage,
-      dstRect: dstRect,
-      srcRect: srcRect,
-      naturalSize: naturalSize,
-      isThumbnail: isThumbnail,
-    );
+        id: id,
+        // ignore: deprecated_member_use_from_same_package
+        assetCache: assetCache,
+        svgString: svgData.string,
+        svgFile: svgData.file,
+        pageIndex: pageIndex,
+        pageSize: .infinite,
+        invertible: invertible,
+        backgroundFit: backgroundFit,
+        onMoveImage: onMoveImage,
+        onDeleteImage: onDeleteImage,
+        onMiscChange: onMiscChange,
+        onLoad: onLoad,
+        newImage: newImage,
+        dstRect: dstRect,
+        srcRect: srcRect,
+        naturalSize: naturalSize,
+        isThumbnail: isThumbnail,
+      )
+      ..rotation = rotation
+      ..aboveStrokes = aboveStrokes;
   }
 }

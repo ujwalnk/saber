@@ -218,24 +218,27 @@ class PngEditorImage extends EditorImage {
   }
 
   @override
-  PngEditorImage copy() => PngEditorImage(
-    id: id,
-    assetCache: assetCache,
-    extension: extension,
-    imageProvider: imageProvider,
-    pageIndex: pageIndex,
-    pageSize: .infinite,
-    invertible: invertible,
-    backgroundFit: backgroundFit,
-    onMoveImage: onMoveImage,
-    onDeleteImage: onDeleteImage,
-    onMiscChange: onMiscChange,
-    onLoad: onLoad,
-    newImage: true,
-    dstRect: dstRect,
-    srcRect: srcRect,
-    naturalSize: naturalSize,
-    thumbnailBytes: thumbnailBytes,
-    isThumbnail: isThumbnail,
-  );
+  PngEditorImage copy() =>
+      PngEditorImage(
+          id: id,
+          assetCache: assetCache,
+          extension: extension,
+          imageProvider: imageProvider,
+          pageIndex: pageIndex,
+          pageSize: .infinite,
+          invertible: invertible,
+          backgroundFit: backgroundFit,
+          onMoveImage: onMoveImage,
+          onDeleteImage: onDeleteImage,
+          onMiscChange: onMiscChange,
+          onLoad: onLoad,
+          newImage: true,
+          dstRect: dstRect,
+          srcRect: srcRect,
+          naturalSize: naturalSize,
+          thumbnailBytes: thumbnailBytes,
+          isThumbnail: isThumbnail,
+        )
+        ..rotation = rotation
+        ..aboveStrokes = aboveStrokes;
 }

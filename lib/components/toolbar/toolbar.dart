@@ -40,6 +40,7 @@ class Toolbar extends StatefulWidget {
     required this.toggleTextEditing,
     required this.toggleFingerDrawing,
     required this.pickPhoto,
+    required this.pickSticker,
     required this.paste,
     required this.showExportOptions,
     required this.exportAsSba,
@@ -60,6 +61,8 @@ class Toolbar extends StatefulWidget {
   final VoidCallback toggleFingerDrawing;
 
   final VoidCallback pickPhoto;
+
+  final VoidCallback pickSticker;
 
   final VoidCallback paste;
 
@@ -789,6 +792,15 @@ class _ToolbarState extends State<Toolbar> {
           onPressed: widget.pickPhoto,
           padding: buttonPadding,
           child: _toolIcon(Symbols.image),
+        ),
+      ],
+      ToolbarItem.sticker: [
+        ToolbarIconButton(
+          tooltip: 'Sticker',
+          enabled: !widget.readOnly,
+          onPressed: widget.pickSticker,
+          padding: buttonPadding,
+          child: _toolIcon(Symbols.sticky_note_2),
         ),
       ],
       ToolbarItem.text: [

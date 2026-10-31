@@ -17,6 +17,7 @@ import 'package:saber/components/settings/settings_selection.dart';
 import 'package:saber/components/settings/settings_sentry.dart';
 import 'package:saber/components/settings/settings_subtitle.dart';
 import 'package:saber/components/settings/settings_switch.dart';
+import 'package:saber/components/toolbar/sticker_picker.dart';
 import 'package:saber/components/toolbar/toolbar_customize_dialog.dart';
 import 'package:saber/components/settings/update_manager.dart';
 import 'package:saber/components/theming/adaptive_alert_dialog.dart';
@@ -408,6 +409,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
 
                 SettingsSubtitle(subtitle: t.settings.prefCategories.editor),
+                ValueListenableBuilder<String?>(
+                  valueListenable: stows.stickerDirectory,
+                  builder: (context, directory, _) => SettingsButton(
+                    title: 'Sticker folder',
+                    subtitle:
+                        directory ??
+                        'Choose a folder with PNG, JPEG or GIF stickers',
+                    icon: Icons.emoji_emotions_outlined,
+                    onPressed: StickerLibrary.pickDirectory,
+                  ),
+                ),
                 SettingsButton(
                   title: 'Customize toolbar',
                   subtitle: 'Rearrange the editor toolbar or remove tools',

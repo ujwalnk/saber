@@ -14,6 +14,8 @@ class SelectionPopup extends StatelessWidget {
     required this.duplicateSelection,
     required this.copySelection,
     required this.deleteSelection,
+    this.moveForward,
+    this.moveBackward,
   });
 
   /// The selection's bounds, relative to the enclosing stack.
@@ -23,7 +25,15 @@ class SelectionPopup extends StatelessWidget {
   final VoidCallback copySelection;
   final VoidCallback deleteSelection;
 
+  /// Move the selected images one layer up / down. Only shown when given
+  /// (i.e. when the selection contains images).
+  final VoidCallback? moveForward;
+  final VoidCallback? moveBackward;
+
   static const double gap = 12;
+
+  /// Space for the selection's rotate handle when the popup is above it.
+  static const double gapAbove = 66;
   static const double edgeMargin = 8;
 
   @override
@@ -38,6 +48,10 @@ class SelectionPopup extends StatelessWidget {
         child: Row(
           mainAxisSize: .min,
           children: [
+            if (moveBackward != null)
+              _textButton(context, label: 'Backward', onPressed: moveBackward!),
+            if (moveForward != null)
+              _textButton(context, label: 'Forward', onPressed: moveForward!),
             _textButton(
               context,
               label: t.editor.selectionBar.duplicate,
@@ -102,7 +116,8 @@ class _SelectionPopupLayoutDelegate extends SingleChildLayoutDelegate {
         .clamp(margin, maxX < margin ? margin : maxX)
         .toDouble();
 
-    final above = selectionRect.top - gap - childSize.height;
+    final above =
+        selectionRect.top - SelectionPopup.gapAbove - childSize.height;
     final below = selectionRect.bottom + gap;
 
     double y;
