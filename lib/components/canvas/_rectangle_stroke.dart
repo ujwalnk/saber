@@ -137,6 +137,20 @@ class RectangleStroke extends Stroke {
     super.shift(offset);
   }
 
+  /// Rectangles stay axis-aligned, so they are resized and moved but not
+  /// rotated.
+  @override
+  void applyTransform(Stroke original, StrokeTransform transform) {
+    final source = (original as RectangleStroke).rect;
+    rect = Rect.fromCenter(
+      center: transform.apply(source.center),
+      width: source.width * transform.scaleX.abs(),
+      height: source.height * transform.scaleY.abs(),
+    );
+    options.size = original.options.size * transform.sizeScale;
+    markPolygonNeedsUpdating();
+  }
+
   @override
   @Deprecated('We already know the shape is a rectangle.')
   RecognizedUnistroke detectShape() {

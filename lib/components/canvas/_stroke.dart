@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 import 'package:fixnum/fixnum.dart';
@@ -82,6 +83,20 @@ class Stroke {
     _highQualityPolygon?.shift(offset);
     _lowQualityPath = _lowQualityPath?.shift(offset);
     _highQualityPath = _highQualityPath?.shift(offset);
+  }
+
+  /// Makes this stroke a transformed copy of [original]:
+  /// every point is mapped by [transform], and the pen size is scaled with it.
+  /// Always computed from [original] so repeated calls don't build up error.
+  void applyTransform(Stroke original, StrokeTransform transform) {
+    final count = min(points.length, original.points.length);
+    for (var i = 0; i < count; i++) {
+      final point = original.points[i];
+      final mapped = transform.apply(Offset(point.dx, point.dy));
+      points[i] = PointVector(mapped.dx, mapped.dy, point.pressure);
+    }
+    options.size = original.options.size * transform.sizeScale;
+    markPolygonNeedsUpdating();
   }
 
   void markPolygonNeedsUpdating() {
@@ -484,4 +499,51 @@ enum StrokeQuality(
 ) {
   low(4),
   high(1)
+}
+
+/// A scale (about [anchor]) followed by a rotation (about [anchor]):
+/// `anchor + R(angle) * S(scaleX, scaleY) * (p - anchor)`.
+class StrokeTransform {
+  const StrokeTransform({
+    required this.anchor,
+    this.scaleX = 1,
+    this.scaleY = 1,
+    this.angle = 0,
+  });
+
+  final Offset anchor;
+  final double scaleX, scaleY;
+
+  /// In radians.
+  final double angle;
+
+  Offset apply(Offset point) {
+    final d = point - anchor;
+    final x = d.dx * scaleX;
+    final y = d.dy * scaleY;
+    final c = cos(angle);
+    final s = sin(angle);
+    return anchor + Offset(x * c - y * s, x * s + y * c);
+  }
+
+  /// How much line widths (and circle radii) change.
+  double get sizeScale => sqrt(scaleX.abs() * scaleY.abs());
+
+  /// The same transform as a column-major 4x4 matrix for [Path.transform].
+  Float64List get matrix4 {
+    final c = cos(angle);
+    final s = sin(angle);
+    final a = c * scaleX;
+    final b = s * scaleX;
+    final cc = -s * scaleY;
+    final d = c * scaleY;
+    final tx = anchor.dx - (a * anchor.dx + cc * anchor.dy);
+    final ty = anchor.dy - (b * anchor.dx + d * anchor.dy);
+    return Float64List.fromList([
+      a, b, 0, 0, //
+      cc, d, 0, 0, //
+      0, 0, 1, 0, //
+      tx, ty, 0, 1, //
+    ]);
+  }
 }

@@ -126,6 +126,15 @@ class CircleStroke extends Stroke {
   }
 
   @override
+  void applyTransform(Stroke original, StrokeTransform transform) {
+    final circle = original as CircleStroke;
+    center = transform.apply(circle.center);
+    radius = circle.radius * transform.sizeScale;
+    options.size = circle.options.size * transform.sizeScale;
+    markPolygonNeedsUpdating();
+  }
+
+  @override
   @Deprecated('We already know the shape is a circle.')
   RecognizedUnistroke detectShape() {
     return RecognizedUnistroke(

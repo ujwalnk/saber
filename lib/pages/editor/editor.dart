@@ -60,6 +60,19 @@ import 'package:super_clipboard/super_clipboard.dart';
 
 typedef _PhotoInfo = ({Uint8List bytes, String extension});
 
+/// The handles around a lasso selection: eight to resize it, one to rotate.
+enum _SelectionHandle {
+  topLeft,
+  top,
+  topRight,
+  right,
+  bottomRight,
+  bottom,
+  bottomLeft,
+  left,
+  rotate,
+}
+
 /// Where a paste should go: the page, and the position on that page
 /// (in page coordinates).
 typedef _PasteTarget = ({int pageIndex, Offset position});
@@ -275,6 +288,304 @@ class EditorState extends State<Editor> {
   /// A private in-app clipboard for copied lasso selections.
   /// The normal system clipboard continues to be used for copied images.
   dynamic _copiedSelection;
+
+  // --- resizing / rotating the lasso selection with its handles ---
+
+  static const _minHandleScale = 0.05;
+  static const _rotateHandleDistance = 38.0;
+
+  int? _handlePointer;
+  _SelectionHandle? _activeHandle;
+  bool _handleMoved = false;
+
+  /// Everything below is in page coordinates, captured when a drag starts.
+  Offset _handleStart = .zero;
+  Offset _handleAnchor = .zero;
+  List<Stroke> _originalStrokes = const [];
+  List<EditorImage> _originalImages = const [];
+  Path _originalPath = Path();
+
+  Offset _handlePositionOn(Rect bounds, _SelectionHandle handle) {
+    return switch (handle) {
+      .topLeft => bounds.topLeft,
+      .top => bounds.topCenter,
+      .topRight => bounds.topRight,
+      .right => bounds.centerRight,
+      .bottomRight => bounds.bottomRight,
+      .bottom => bounds.bottomCenter,
+      .bottomLeft => bounds.bottomLeft,
+      .left => bounds.centerLeft,
+      .rotate => bounds.topCenter,
+    };
+  }
+
+  _SelectionHandle _oppositeHandle(_SelectionHandle handle) {
+    return switch (handle) {
+      .topLeft => .bottomRight,
+      .top => .bottom,
+      .topRight => .bottomLeft,
+      .right => .left,
+      .bottomRight => .topLeft,
+      .bottom => .top,
+      .bottomLeft => .topRight,
+      .left => .right,
+      .rotate => .rotate,
+    };
+  }
+
+  RenderBox? get _selectionPageBox {
+    final select = currentTool;
+    if (select is! Select || !select.doneSelecting) return null;
+    final index = select.selectResult.pageIndex;
+    if (index < 0 || index >= coreInfo.pages.length) return null;
+    final box = coreInfo.pages[index].renderBox;
+    return box != null && box.attached ? box : null;
+  }
+
+  void _startHandleDrag(_SelectionHandle handle, PointerDownEvent event) {
+    if (_handlePointer != null || coreInfo.readOnly) return;
+    final box = _selectionPageBox;
+    if (box == null) return;
+    final select = currentTool as Select;
+    final result = select.selectResult;
+    if (result.isEmpty) return;
+
+    final bounds = result.path.getBounds();
+    if (bounds.isEmpty) return;
+
+    _handlePointer = event.pointer;
+    _activeHandle = handle;
+    _handleMoved = false;
+    _originalStrokes = [for (final stroke in result.strokes) stroke.copy()];
+    _originalImages = [for (final image in result.images) image.copy()];
+    _originalPath = Path.from(result.path);
+
+    final pointerOnPage = box.globalToLocal(event.position);
+    if (handle == _SelectionHandle.rotate) {
+      _handleAnchor = bounds.center;
+      _handleStart = pointerOnPage;
+    } else {
+      _handleAnchor = _handlePositionOn(bounds, _oppositeHandle(handle));
+      _handleStart = _handlePositionOn(bounds, handle);
+    }
+  }
+
+  void _updateHandleDrag(PointerMoveEvent event) {
+    if (event.pointer != _handlePointer) return;
+    final handle = _activeHandle;
+    final box = _selectionPageBox;
+    if (handle == null || box == null) return;
+    final select = currentTool as Select;
+    final result = select.selectResult;
+
+    final pointer = box.globalToLocal(event.position);
+    final anchor = _handleAnchor;
+    final start = _handleStart;
+
+    double ratio(double now, double then) {
+      if (then.abs() < 1e-6) return 1;
+      return max(_minHandleScale, now / then);
+    }
+
+    final StrokeTransform transform;
+    switch (handle) {
+      case .rotate:
+        final before = (start - anchor).direction;
+        final now = (pointer - anchor).direction;
+        transform = StrokeTransform(anchor: anchor, angle: now - before);
+      case .topLeft || .topRight || .bottomLeft || .bottomRight:
+        final from = start - anchor;
+        final to = pointer - anchor;
+        final denominator = from.distanceSquared;
+        final scale = denominator < 1e-6
+            ? 1.0
+            : max(
+                _minHandleScale,
+                (to.dx * from.dx + to.dy * from.dy) / denominator,
+              );
+        transform = StrokeTransform(
+          anchor: anchor,
+          scaleX: scale,
+          scaleY: scale,
+        );
+      case .left || .right:
+        transform = StrokeTransform(
+          anchor: anchor,
+          scaleX: ratio(pointer.dx - anchor.dx, start.dx - anchor.dx),
+        );
+      case .top || .bottom:
+        transform = StrokeTransform(
+          anchor: anchor,
+          scaleY: ratio(pointer.dy - anchor.dy, start.dy - anchor.dy),
+        );
+    }
+
+    for (var i = 0; i < result.strokes.length; i++) {
+      result.strokes[i].applyTransform(_originalStrokes[i], transform);
+    }
+    for (var i = 0; i < result.images.length; i++) {
+      final original = _originalImages[i].dstRect;
+      result.images[i].dstRect = transform.angle == 0
+          ? Rect.fromPoints(
+              transform.apply(original.topLeft),
+              transform.apply(original.bottomRight),
+            )
+          : Rect.fromCenter(
+              center: transform.apply(original.center),
+              width: original.width,
+              height: original.height,
+            );
+    }
+    result.path = _originalPath.transform(transform.matrix4);
+    _handleMoved = true;
+
+    coreInfo.pages[result.pageIndex].redrawStrokes();
+    _updateSelectionPopupRect();
+    setState(() {});
+  }
+
+  void _endHandleDrag(PointerEvent event) {
+    if (event.pointer != _handlePointer) return;
+    _handlePointer = null;
+    _activeHandle = null;
+
+    final select = currentTool;
+    if (select is! Select || !select.doneSelecting) return;
+    final result = select.selectResult;
+    final originalStrokes = _originalStrokes;
+    final originalImages = _originalImages;
+    _originalStrokes = const [];
+    _originalImages = const [];
+
+    // just a tap on a handle: nothing changed
+    if (!_handleMoved) return;
+    _handleMoved = false;
+
+    // undo puts back the original, redo puts back the transformed selection
+    history.recordChange(
+      EditorHistoryItem(
+        type: .erase,
+        pageIndex: result.pageIndex,
+        strokes: originalStrokes,
+        images: originalImages,
+      ),
+    );
+    history.recordChange(
+      EditorHistoryItem(
+        type: .draw,
+        pageIndex: result.pageIndex,
+        strokes: List.of(result.strokes),
+        images: List.of(result.images),
+      ),
+    );
+
+    // wrap the selection tightly around what it now contains
+    Rect? bounds;
+    for (final stroke in result.strokes) {
+      final strokeBounds = stroke.lowQualityPath.getBounds();
+      bounds = bounds == null
+          ? strokeBounds
+          : bounds.expandToInclude(strokeBounds);
+    }
+    for (final image in result.images) {
+      bounds = bounds == null
+          ? image.dstRect
+          : bounds.expandToInclude(image.dstRect);
+    }
+    if (bounds != null && !bounds.isEmpty) {
+      result.path = Path()..addRect(bounds);
+    }
+
+    _updateSelectionPopupRect();
+    setState(() {});
+    autosaveAfterDelay();
+  }
+
+  Widget _buildSelectionHandles(Rect rect, ColorScheme colorScheme) {
+    const hit = 40.0;
+    const dot = 14.0;
+    final handles = [
+      for (final handle in _SelectionHandle.values)
+        (
+          handle,
+          switch (handle) {
+            .rotate => rect.topCenter - const Offset(0, _rotateHandleDistance),
+            _ => _handlePositionOn(rect, handle),
+          },
+        ),
+    ];
+
+    return Positioned.fill(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fromRect(
+            rect: rect,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: colorScheme.primary.withValues(alpha: 0.7),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: rect.center.dx - 0.5,
+            top: rect.top - _rotateHandleDistance,
+            width: 1,
+            height: _rotateHandleDistance,
+            child: IgnorePointer(
+              child: ColoredBox(
+                color: colorScheme.primary.withValues(alpha: 0.7),
+              ),
+            ),
+          ),
+          for (final (handle, position) in handles)
+            Positioned(
+              left: position.dx - hit / 2,
+              top: position.dy - hit / 2,
+              width: hit,
+              height: hit,
+              child: Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: (event) => _startHandleDrag(handle, event),
+                onPointerMove: _updateHandleDrag,
+                onPointerUp: _endHandleDrag,
+                onPointerCancel: _endHandleDrag,
+                child: Center(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colorScheme.surface,
+                      shape: handle == _SelectionHandle.rotate
+                          ? BoxShape.circle
+                          : BoxShape.rectangle,
+                      borderRadius: handle == _SelectionHandle.rotate
+                          ? null
+                          : const BorderRadius.all(Radius.circular(3)),
+                      border: Border.all(color: colorScheme.primary, width: 2),
+                    ),
+                    child: SizedBox.square(
+                      dimension: handle == _SelectionHandle.rotate
+                          ? dot + 4
+                          : dot,
+                      child: handle == _SelectionHandle.rotate
+                          ? Icon(
+                              Icons.rotate_right,
+                              size: dot,
+                              color: colorScheme.primary,
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   /// Recomputes the selection popup's position in canvas-area coordinates.
   void _updateSelectionPopupRect() {
@@ -2109,6 +2420,17 @@ class EditorState extends State<Editor> {
               copySelection: _copySelection,
               deleteSelection: _deleteSelection,
             );
+          },
+        ),
+        ValueListenableBuilder<Rect?>(
+          valueListenable: _selectionPopupRect,
+          builder: (context, selectionRect, _) {
+            if (selectionRect == null ||
+                coreInfo.readOnly ||
+                currentTool is! Select) {
+              return const SizedBox.shrink();
+            }
+            return _buildSelectionHandles(selectionRect, colorScheme);
           },
         ),
         ValueListenableBuilder<Offset?>(

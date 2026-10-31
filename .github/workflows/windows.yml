@@ -3,21 +3,16 @@ name: Build for Windows
 on:
   # Enable manual run
   workflow_dispatch:
-  push:
-    tags:
-      - "**"
-    branches:
-      - "**"
-    paths:
-      - .github/workflows/windows.yml
-      - installers/desktop_inno_script.iss
+  # Called by release.yml
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   build-windows:
     name: Build for Windows
     runs-on: windows-latest
-    permissions:
-      contents: write
     timeout-minutes: 20
     steps:
       - name: Checkout code
@@ -84,12 +79,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Saber-Windows
+          name: release-windows
           path: installers/${{ steps.rename.outputs.installerName }}
-
-      - name: Upload to GitHub release
-        uses: svenstaro/upload-release-action@v2
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: installers/${{ steps.rename.outputs.installerName }}

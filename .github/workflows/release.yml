@@ -1,0 +1,107 @@
+name: Release
+
+# Builds Android, Linux, macOS and Windows packages on every push
+# (branches and tags) and publishes them in a single GitHub release.
+#
+# - Tag push (e.g. v1.36.1):  regular release named after the tag.
+# - Branch push:              pre-release tagged v<buildName>-build.<run number>,
+#                             so every push gets its own release.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "**"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare release info
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Work out tag and release name
+        id: meta
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          buildName=$(grep -oP "(?<=buildName = ').*(?=')" lib/data/version.dart)
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            tag="$REF_NAME"
+            name="Saber $REF_NAME"
+            prerelease=false
+          else
+            tag="v${buildName}-build.${RUN_NUMBER}"
+            name="Saber v${buildName} (build ${RUN_NUMBER})"
+            prerelease=true
+          fi
+
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+          echo "name=$name" >> $GITHUB_OUTPUT
+          echo "prerelease=$prerelease" >> $GITHUB_OUTPUT
+
+  android:
+    name: Android
+    uses: ./.github/workflows/android.yml
+    secrets: inherit
+
+  linux:
+    name: Linux
+    uses: ./.github/workflows/linux.yml
+
+  macos:
+    name: macOS
+    uses: ./.github/workflows/macos.yml
+
+  windows:
+    name: Windows
+    uses: ./.github/workflows/windows.yml
+
+  release:
+    name: Create GitHub release
+    needs: [prepare, android, linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 15
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: List release files
+        run: ls -lh dist
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Automated build of `${{ github.ref_name }}` at commit ${{ github.sha }}.
+
+            The macOS build is not signed or notarized: right-click the app and choose **Open** the first time you run it.
+          files: dist/*
