@@ -21,7 +21,7 @@ permissions:
 jobs:
   prepare:
     name: Prepare release info
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
@@ -76,7 +76,9 @@ jobs:
   release:
     name: Create GitHub release
     needs: [prepare, android, linux, macos, windows]
-    runs-on: ubuntu-latest
+    # Run even if some platform builds failed: whatever was built gets released.
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     timeout-minutes: 15
@@ -88,8 +90,14 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: List release files
-        run: ls -lh dist
+      - name: Check there is something to release
+        run: |
+          mkdir -p dist
+          ls -lh dist
+          if [ -z "$(ls -A dist)" ]; then
+            echo "::error::No platform build succeeded, nothing to release."
+            exit 1
+          fi
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -104,4 +112,6 @@ jobs:
             Automated build of `${{ github.ref_name }}` at commit ${{ github.sha }}.
 
             The macOS build is not signed or notarized: right-click the app and choose **Open** the first time you run it.
+
+            Build results: Android ${{ needs.android.result }}, Linux ${{ needs.linux.result }}, macOS ${{ needs.macos.result }}, Windows ${{ needs.windows.result }}.
           files: dist/*
