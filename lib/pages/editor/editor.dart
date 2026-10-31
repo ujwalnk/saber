@@ -567,7 +567,7 @@ class EditorState extends State<Editor> {
 
     // the selection frame replaces the image's own "just added" frame
     image.newImage = false;
-    setTool(Select.currentSelect);
+    setState(() => currentTool = Select.currentSelect);
     _selectImageWhenLoaded(image);
   }
 
