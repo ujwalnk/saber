@@ -5,7 +5,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/services.dart';
 import 'package:saber/data/prefs.dart';
 
 /// Finds the stickers in the folder chosen in Settings.
@@ -33,31 +33,87 @@ abstract final class StickerLibrary {
     return true;
   }
 
-  /// Choosing a folder doesn't let the app read its files with `dart:io`:
-  /// on Android that needs the permission to read images.
+  // The Android app already ships the permission_handler plugin, but the
+  // Linux build doesn't have that package, so its channel is used directly
+  // instead of importing it.
+  static const _permissionsChannel = MethodChannel(
+    'flutter.baseflow.com/permissions/methods',
+  );
+
+  /// permission_handler's numbering: 9 is "photos" (READ_MEDIA_IMAGES) and
+  /// 15 is "storage" (READ_EXTERNAL_STORAGE, for Android 12 and older).
   static Future<void> _requestReadAccess() async {
     if (!Platform.isAndroid) return;
-    final sdkInt = await DeviceInfoPlugin().androidInfo.then(
-      (info) => info.version.sdkInt,
-    );
-    final permission = sdkInt >= 33 ? Permission.photos : Permission.storage;
-    if (await permission.isGranted) return;
-    await permission.request();
+    try {
+      final sdkInt = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
+      await _permissionsChannel.invokeMethod('requestPermissions', [
+        sdkInt >= 33 ? 9 : 15,
+      ]);
+    } catch (_) {
+      // best effort: the user can still allow it in the system settings
+    }
+  }
+
+  /// Opens this app's page in the system settings (Android only).
+  static Future<void> openAppSettings() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _permissionsChannel.invokeMethod('openAppSettings');
+    } catch (_) {}
+  }
+
+  /// On Android the folder picker returns a `content://` "tree" address
+  /// (e.g. `content://com.android.externalstorage.documents/tree/ABCD-1234%3AStickers`),
+  /// which `dart:io` can't open. For folders on internal storage or an SD card
+  /// this works out the ordinary path (`/storage/ABCD-1234/Stickers`).
+  /// Returns null for locations that have no ordinary path.
+  static String? _resolvePath(String stored) {
+    if (!stored.startsWith('content://')) return stored;
+
+    final uri = Uri.tryParse(stored);
+    if (uri == null ||
+        uri.authority != 'com.android.externalstorage.documents') {
+      return null;
+    }
+    final segments = uri.pathSegments;
+    final treeIndex = segments.indexOf('tree');
+    if (treeIndex < 0 || treeIndex + 1 >= segments.length) return null;
+
+    // e.g. "primary:Pictures/Stickers" or "ABCD-1234:Stickers"
+    final documentId = segments[treeIndex + 1];
+    final colon = documentId.indexOf(':');
+    final volume = colon < 0 ? documentId : documentId.substring(0, colon);
+    final relative = colon < 0 ? '' : documentId.substring(colon + 1);
+
+    final root = volume == 'primary'
+        ? '/storage/emulated/0'
+        : '/storage/$volume';
+    return relative.isEmpty ? root : '$root/$relative';
   }
 
   /// The sticker files in the folder, sorted by name.
   /// Throws if the folder can't be read.
   static Future<List<File>> list() async {
-    final path = stows.stickerDirectory.value;
-    if (path == null || path.isEmpty) return const [];
+    final stored = stows.stickerDirectory.value;
+    if (stored == null || stored.isEmpty) return const [];
 
     await _requestReadAccess();
+
+    final path = _resolvePath(stored);
+    if (path == null) {
+      throw FileSystemException(
+        "This kind of location can't be read. Choose a folder on the "
+        'phone or on an SD card',
+        stored,
+      );
+    }
 
     final directory = Directory(path);
     if (!directory.existsSync()) {
       throw FileSystemException(
-        'The sticker folder could not be found. It may be a protected '
-        'location, or the app may not have been given access to it',
+        'The folder could not be opened. If it exists, allow the app to '
+        'access photos / media in the system settings (App info > '
+        'Permissions)',
         path,
       );
     }
@@ -99,7 +155,9 @@ class _StickerPickerState extends State<StickerPicker> {
   Future<void> _chooseFolder() async {
     if (!await StickerLibrary.pickDirectory()) return;
     if (!mounted) return;
-    setState(() => _stickers = StickerLibrary.list());
+    setState(() {
+      _stickers = StickerLibrary.list();
+    });
   }
 
   @override
@@ -129,6 +187,9 @@ class _StickerPickerState extends State<StickerPicker> {
               text: "Couldn't read the sticker folder.",
               details: '${stows.stickerDirectory.value}\n${snapshot.error}',
               onChooseFolder: _chooseFolder,
+              onOpenSettings: Platform.isAndroid
+                  ? StickerLibrary.openAppSettings
+                  : null,
             );
           }
           final stickers = snapshot.data!;
@@ -138,9 +199,14 @@ class _StickerPickerState extends State<StickerPicker> {
               text: stows.stickerDirectory.value == null
                   ? 'No sticker folder chosen yet.\n'
                         'Pick a folder with PNG, JPEG or GIF images.'
-                  : 'There are no PNG, JPEG or GIF images in the sticker '
-                        'folder.',
+                  : 'No PNG, JPEG or GIF images were found in the sticker '
+                        'folder.\nIf the folder does have images, allow '
+                        '"Photos and videos" for this app (choose "Allow '
+                        'all"), then come back.',
               onChooseFolder: _chooseFolder,
+              onOpenSettings: Platform.isAndroid
+                  ? StickerLibrary.openAppSettings
+                  : null,
             );
           }
 
@@ -197,6 +263,7 @@ class _Message extends StatelessWidget {
     required this.icon,
     required this.text,
     required this.onChooseFolder,
+    this.onOpenSettings,
     this.details,
   });
 
@@ -206,6 +273,9 @@ class _Message extends StatelessWidget {
   /// Technical details, shown small, to help work out what went wrong.
   final String? details;
   final VoidCallback onChooseFolder;
+
+  /// Opens the app's system settings, to allow access to photos.
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -240,6 +310,14 @@ class _Message extends StatelessWidget {
               icon: const Icon(Icons.folder_open),
               label: const Text('Choose folder'),
             ),
+            if (onOpenSettings != null) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: onOpenSettings,
+                icon: const Icon(Icons.settings_outlined),
+                label: const Text('App permissions'),
+              ),
+            ],
           ],
         ),
       ),
