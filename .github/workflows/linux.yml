@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FLUTTER_VERSION: "3.47.1"
+
 jobs:
   build-linux:
     strategy:
@@ -55,11 +58,22 @@ jobs:
             ${{ runner.OS }}-${{ matrix.arch.cache-name }}-
 
       - name: Setup Flutter
+        if: matrix.arch.target-platform != 'linux-arm64'
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.47.0
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      # Flutter doesn't publish Linux arm64 SDK archives in its release
+      # manifest, so flutter-action can't find them. Clone the release tag
+      # from git instead; the Dart SDK for arm64 is fetched on first run.
+      - name: Setup Flutter (arm64, from git)
+        if: matrix.arch.target-platform == 'linux-arm64'
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$HOME/flutter"
+          echo "$HOME/flutter/bin" >> $GITHUB_PATH
+          "$HOME/flutter/bin/flutter" --version
 
       - name: Disable Flutter CLI animations
         run: flutter config --no-cli-animations
