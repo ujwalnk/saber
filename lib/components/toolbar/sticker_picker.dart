@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:android_file_picker/android_file_picker.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:saber/data/prefs.dart';
 
 /// Finds the stickers in the folder chosen in Settings.
@@ -31,15 +33,33 @@ abstract final class StickerLibrary {
     return true;
   }
 
+  /// Choosing a folder doesn't let the app read its files with `dart:io`:
+  /// on Android that needs the permission to read images.
+  static Future<void> _requestReadAccess() async {
+    if (!Platform.isAndroid) return;
+    final sdkInt = await DeviceInfoPlugin().androidInfo.then(
+      (info) => info.version.sdkInt,
+    );
+    final permission = sdkInt >= 33 ? Permission.photos : Permission.storage;
+    if (await permission.isGranted) return;
+    await permission.request();
+  }
+
   /// The sticker files in the folder, sorted by name.
   /// Throws if the folder can't be read.
   static Future<List<File>> list() async {
     final path = stows.stickerDirectory.value;
     if (path == null || path.isEmpty) return const [];
 
+    await _requestReadAccess();
+
     final directory = Directory(path);
     if (!directory.existsSync()) {
-      throw FileSystemException('The sticker folder does not exist', path);
+      throw FileSystemException(
+        'The sticker folder could not be found. It may be a protected '
+        'location, or the app may not have been given access to it',
+        path,
+      );
     }
 
     final files = <File>[];
@@ -106,9 +126,8 @@ class _StickerPickerState extends State<StickerPicker> {
           if (snapshot.hasError) {
             return _Message(
               icon: Icons.error_outline,
-              text:
-                  "Couldn't read the sticker folder.\n"
-                  'Choose it again to give the app access to it.',
+              text: "Couldn't read the sticker folder.",
+              details: '${stows.stickerDirectory.value}\n${snapshot.error}',
               onChooseFolder: _chooseFolder,
             );
           }
@@ -178,10 +197,14 @@ class _Message extends StatelessWidget {
     required this.icon,
     required this.text,
     required this.onChooseFolder,
+    this.details,
   });
 
   final IconData icon;
   final String text;
+
+  /// Technical details, shown small, to help work out what went wrong.
+  final String? details;
   final VoidCallback onChooseFolder;
 
   @override
@@ -200,6 +223,17 @@ class _Message extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: colorScheme.onSurfaceVariant),
             ),
+            if (details != null) ...[
+              const SizedBox(height: 12),
+              SelectableText(
+                details!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: onChooseFolder,
