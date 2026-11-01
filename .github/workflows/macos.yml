@@ -61,8 +61,8 @@ jobs:
       - name: Compress macOS build
         id: compress
         run: |
-          # BSD grep has no -P, so use sed instead
-          buildName=$(sed -n "s/.*buildName = '\(.*\)'.*/\1/p" lib/data/version.dart)
+          # Version from pubspec.yaml, without the +build number
+          buildName=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml | head -n1)
           zipName="Saber_v${buildName}.app.zip"
           echo "zipName=$zipName" >> $GITHUB_OUTPUT
 

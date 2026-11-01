@@ -4,7 +4,9 @@ name: Release
 # (branches and tags) and publishes them in a single GitHub release.
 #
 # - Tag push (e.g. v1.36.1):  regular release named after the tag.
-# - Branch push:              pre-release tagged v<buildName>-build.<run number>,
+# - Branch push:              release (marked Latest) tagged v<version from pubspec.yaml>,
+#                             e.g. version: 1.37.4+1200 -> v1.37.4. Bump the
+#                             version on every commit (see .githooks/pre-commit)
 #                             so every push gets its own release.
 
 on:
@@ -38,18 +40,21 @@ jobs:
         env:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          buildName=$(grep -oP "(?<=buildName = ').*(?=')" lib/data/version.dart)
+          version=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml | head -n1)
+          if [ -z "$version" ]; then
+            echo "::error::Could not read the version from pubspec.yaml"
+            exit 1
+          fi
 
           if [ "$REF_TYPE" = "tag" ]; then
             tag="$REF_NAME"
             name="Saber $REF_NAME"
             prerelease=false
           else
-            tag="v${buildName}-build.${RUN_NUMBER}"
-            name="Saber v${buildName} (build ${RUN_NUMBER})"
-            prerelease=true
+            tag="v${version}"
+            name="Saber v${version}"
+            prerelease=false
           fi
 
           echo "tag=$tag" >> $GITHUB_OUTPUT
@@ -106,6 +111,7 @@ jobs:
           name: ${{ needs.prepare.outputs.name }}
           target_commitish: ${{ github.sha }}
           prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          make_latest: true
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |

@@ -72,7 +72,7 @@ jobs:
         shell: bash
         run: |
           export LC_ALL=en_US.utf8
-          buildName=$(grep -oP "(?<=buildName = ').*(?=')" lib/data/version.dart)
+          buildName=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml | head -n1)
           installerName="SaberInstaller_v${buildName}.exe"
           echo "installerName=$installerName" >> $GITHUB_OUTPUT
 

@@ -108,7 +108,7 @@ jobs:
         env:
           FOSS: ${{ matrix.foss }}
         run: |
-          buildName=$(grep -oP "(?<=buildName = ').*(?=')" lib/data/version.dart)
+          buildName=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml | head -n1)
           if [ "$FOSS" = "true" ]; then
             apkName="Saber_FOSS_v${buildName}.apk"
           else

@@ -87,7 +87,7 @@ jobs:
       - name: Compress Flutter build
         id: compress
         run: |
-          buildName=$(grep -oP "(?<=buildName = ').*(?=')" lib/data/version.dart)
+          buildName=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml | head -n1)
           archiveName="Saber_v${buildName}_Linux_${{ matrix.arch.archive-suffix }}.tar.gz"
           echo "archiveName=$archiveName" >> $GITHUB_OUTPUT
 
@@ -126,7 +126,7 @@ jobs:
           mv linux/AppImage/AppDir/usr/bin/share linux/AppImage/AppDir/usr/
 
           # Set environment variables for linuxdeploy
-          buildName=$(grep -oP "(?<=buildName = ').*(?=')" lib/data/version.dart)
+          buildName=$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml | head -n1)
           echo "LDAI_OUTPUT=Saber-${buildName}-${{ matrix.arch.archive-suffix }}.AppImage" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=$(pwd)/linux/AppImage/AppDir/usr/bin/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo 'LDAI_UPDATE_INFORMATION=gh-releases-zsync|saber-notes|saber|latest|Saber-*-${{ matrix.arch.archive-suffix }}.AppImage.zsync' >> $GITHUB_ENV
