@@ -39,7 +39,6 @@ class Toolbar extends StatefulWidget {
     required this.textEditing,
     required this.toggleTextEditing,
     required this.toggleFingerDrawing,
-    required this.pickPhoto,
     required this.pickSticker,
     required this.paste,
     required this.showExportOptions,
@@ -59,8 +58,6 @@ class Toolbar extends StatefulWidget {
   final VoidCallback toggleTextEditing;
 
   final VoidCallback toggleFingerDrawing;
-
-  final VoidCallback pickPhoto;
 
   final VoidCallback pickSticker;
 
@@ -783,15 +780,6 @@ class _ToolbarState extends State<Toolbar> {
             Symbols.ink_eraser,
             selected: widget.currentTool is Eraser,
           ),
-        ),
-      ],
-      ToolbarItem.photo: [
-        ToolbarIconButton(
-          tooltip: t.editor.toolbar.photo,
-          enabled: !widget.readOnly,
-          onPressed: widget.pickPhoto,
-          padding: buttonPadding,
-          child: _toolIcon(Symbols.image),
         ),
       ],
       ToolbarItem.sticker: [

@@ -161,6 +161,7 @@ dependencies:
   dynamic_yaru: ^0.2.0
   image: ^4.8.0
   pool: ^1.5.2
+  image_picker: ^1.2.4
 
 dev_dependencies:
   flutter_test:

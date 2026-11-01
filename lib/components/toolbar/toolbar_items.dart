@@ -17,7 +17,6 @@ enum ToolbarItem {
   select('Select', Symbols.lasso_select),
   laserPointer('Laser pointer', Symbols.stylus_laser_pointer),
   eraser('Eraser', Symbols.ink_eraser),
-  photo('Photo', Symbols.image),
   sticker('Sticker', Symbols.sticky_note_2),
   text('Text', Symbols.text_fields),
   fingerDrawing('Finger drawing', Symbols.touch_app);

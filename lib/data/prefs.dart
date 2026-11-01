@@ -59,6 +59,15 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// The note that was open when the camera was launched to add a photo.
+  /// If Android closed the app while the camera was open, the photo is
+  /// recovered when that note is opened again.
+  final pendingCameraNote = PlainStow<String?>(
+    'pendingCameraNote',
+    null,
+    volatile: !_isOnMainIsolate,
+  );
+
   final allowInsecureConnections = SecureStow.bool(
     'allowInsecureConnections',
     false,

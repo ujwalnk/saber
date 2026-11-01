@@ -29,6 +29,8 @@ import 'package:saber/components/theming/adaptive_alert_dialog.dart';
 import 'package:saber/components/theming/adaptive_icon.dart';
 import 'package:saber/components/theming/dynamic_material_app.dart';
 import 'package:saber/components/theming/saber_theme.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:saber/components/toolbar/photo_crop_page.dart';
 import 'package:saber/components/toolbar/samsung_panel.dart';
 import 'package:saber/components/toolbar/sticker_picker.dart';
 import 'package:saber/components/toolbar/selection_popup.dart';
@@ -1039,6 +1041,32 @@ class EditorState extends State<Editor> {
     if (widget.pdfPath != null) {
       await importPdfFromFilePath(widget.pdfPath!);
     }
+
+    await _recoverCameraPhoto();
+  }
+
+  /// If Android closed the app while the camera was open, the picture that
+  /// was taken is waiting for us. Carry on with it when the note it was for
+  /// is opened again.
+  Future<void> _recoverCameraPhoto() async {
+    if (!canTakePhotos || coreInfo.readOnly) return;
+    if (stows.pendingCameraNote.value != coreInfo.filePath) return;
+    stows.pendingCameraNote.value = null;
+
+    Uint8List? bytes;
+    try {
+      final lost = await ImagePicker().retrieveLostData();
+      if (lost.isEmpty) return;
+      bytes = await lost.file?.readAsBytes();
+    } catch (e) {
+      log.warning('Could not recover the camera photo', e);
+      return;
+    }
+    if (bytes == null || !mounted) return;
+
+    final cropped = await PhotoCropPage.show(context, bytes);
+    if (cropped == null || !mounted) return;
+    await _pickPhotos([(bytes: cropped, extension: '.png')]);
   }
 
   Future _loadCoreInfo(String filePath) async {
@@ -2139,6 +2167,54 @@ class EditorState extends State<Editor> {
     image.addListener(listener);
   }
 
+  /// Asks whether to take a photo or pick one from the gallery, lets the user
+  /// cut it out with four free corners, and adds the result to the page.
+  Future<void> _addPhotoWithCrop() async {
+    if (coreInfo.readOnly) return;
+
+    // desktops have no camera, so only the gallery is offered
+    final source = canTakePhotos
+        ? await showPhotoSourceDialog(context)
+        : PhotoSource.gallery;
+    if (source == null || !mounted) return;
+
+    Uint8List? bytes;
+    try {
+      switch (source) {
+        case .camera:
+          // Free as much memory as possible: Android may close the app while
+          // the camera is open, and big apps are the first to go.
+          PaintingBinding.instance.imageCache
+            ..clear()
+            ..clearLiveImages();
+          // remember the note, so the photo can be recovered if that happens
+          stows.pendingCameraNote.value = coreInfo.filePath;
+          final photo = await ImagePicker().pickImage(
+            source: ImageSource.camera,
+            // a smaller photo is much lighter to crop
+            maxWidth: 3000,
+            maxHeight: 3000,
+          );
+          stows.pendingCameraNote.value = null;
+          bytes = await photo?.readAsBytes();
+        case .gallery:
+          final files = await FilePicker.pickFiles(type: FileType.image);
+          if (files.isNotEmpty) bytes = await files.first.readAsBytes();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Couldn't get a photo: $e")));
+      return;
+    }
+    if (bytes == null || !mounted) return;
+
+    final cropped = await PhotoCropPage.show(context, bytes);
+    if (cropped == null || !mounted) return;
+
+    await _pickPhotos([(bytes: cropped, extension: '.png')]);
+  }
+
   Future<List<_PhotoInfo>> _pickPhotosWithFilePicker() async {
     final List<PlatformFile> files = await FilePicker.pickFiles(
       type: FileType.custom,
@@ -2543,7 +2619,6 @@ class EditorState extends State<Editor> {
                   !stows.editorFingerDrawing.value;
               lastSeenPointerCount = 0;
             },
-            pickPhoto: _pickPhotos,
             pickSticker: _pickSticker,
             paste: paste,
             showExportOptions: showExportOptions,
@@ -2846,6 +2921,19 @@ class EditorState extends State<Editor> {
                             updateSystem: true,
                           )
                         : null,
+                  ),
+                  IconButton(
+                    style: IconButton.styleFrom(
+                      fixedSize: const Size(44, 44),
+                      padding: EdgeInsets.zero,
+                      shape: const CircleBorder(),
+                    ),
+                    icon: const AdaptiveIcon(
+                      icon: Icons.add_photo_alternate_outlined,
+                      cupertinoIcon: CupertinoIcons.photo,
+                    ),
+                    tooltip: t.editor.toolbar.photo,
+                    onPressed: !coreInfo.readOnly ? _addPhotoWithCrop : null,
                   ),
                   IconButton(
                     style: IconButton.styleFrom(
