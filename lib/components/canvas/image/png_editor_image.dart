@@ -119,7 +119,9 @@ class PngEditorImage extends EditorImage {
   @override
   Map<String, dynamic> toJson(OrderedAssetCache assets) =>
       super.toJson(assets)
-        ..addAll({if (imageProvider != null) 'a': assets.add(imageProvider!)});
+        ..addAll({
+          if (imageProvider != null) 'a': assets.addImage(imageProvider!),
+        });
 
   @override
   Future<void> firstLoad() async {
@@ -137,12 +139,20 @@ class PngEditorImage extends EditorImage {
         );
       }
 
-      naturalSize = await ui.ImmutableBuffer.fromUint8List(bytes)
-          .then((buffer) => ui.ImageDescriptor.encoded(buffer))
-          .then(
-            (descriptor) =>
-                Size(descriptor.width.toDouble(), descriptor.height.toDouble()),
+      final sizeBuffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+      try {
+        final descriptor = await ui.ImageDescriptor.encoded(sizeBuffer);
+        try {
+          naturalSize = Size(
+            descriptor.width.toDouble(),
+            descriptor.height.toDouble(),
           );
+        } finally {
+          descriptor.dispose();
+        }
+      } finally {
+        sizeBuffer.dispose();
+      }
 
       if (maxSize == null) {
         await stows.maxImageSize.waitUntilRead();
@@ -152,13 +162,13 @@ class PngEditorImage extends EditorImage {
       if (naturalSize.width != reducedSize.width && !isThumbnail) {
         await null; // wait for next event-loop iteration
 
-        final resizedByteData = await resizeImage(
+        final resizedImage = await _resizeImage(
           bytes,
-          width: reducedSize.width.toInt(),
-          height: reducedSize.height.toInt(),
+          width: reducedSize.width.round(),
+          height: reducedSize.height.round(),
         );
-        if (resizedByteData != null) {
-          imageProvider = MemoryImage(resizedByteData.buffer.asUint8List());
+        if (resizedImage != null) {
+          imageProvider = MemoryImage(resizedImage);
         }
 
         naturalSize = reducedSize;
@@ -241,4 +251,42 @@ class PngEditorImage extends EditorImage {
         )
         ..rotation = rotation
         ..aboveStrokes = aboveStrokes;
+}
+
+/// Resizes the image [rawImage] to [width] and [height].
+///
+/// Every native object is disposed as soon as it is no longer needed,
+/// so memory is released immediately instead of waiting for the GC.
+Future<Uint8List?> _resizeImage(
+  Uint8List rawImage, {
+  required int width,
+  required int height,
+}) async {
+  final buffer = await ui.ImmutableBuffer.fromUint8List(rawImage);
+  try {
+    final descriptor = await ui.ImageDescriptor.encoded(buffer);
+    try {
+      final codec = await descriptor.instantiateCodec(
+        targetWidth: width,
+        targetHeight: height,
+      );
+      try {
+        final resizedImage = (await codec.getNextFrame()).image;
+        try {
+          final byteData = await resizedImage.toByteData(
+            format: ui.ImageByteFormat.png,
+          );
+          return byteData?.buffer.asUint8List();
+        } finally {
+          resizedImage.dispose();
+        }
+      } finally {
+        codec.dispose();
+      }
+    } finally {
+      descriptor.dispose();
+    }
+  } finally {
+    buffer.dispose();
+  }
 }

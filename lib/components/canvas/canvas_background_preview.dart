@@ -4,6 +4,7 @@ import 'package:saber/components/canvas/canvas_image.dart';
 import 'package:saber/components/canvas/image/editor_image.dart';
 import 'package:saber/components/canvas/inner_canvas.dart';
 import 'package:saber/data/extensions/color_extensions.dart';
+import 'package:saber/data/prefs.dart';
 import 'package:sbn/canvas_background_pattern.dart';
 
 class CanvasBackgroundPreview extends StatelessWidget {
@@ -35,6 +36,16 @@ class CanvasBackgroundPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.of(context);
+
+    final invertColorScheme =
+        !stows.editorAutoInvert.value && colorScheme.brightness == .dark;
+
+    final Color backgroundPrimaryColor = colorScheme.primary.withInversion(
+      invertColorScheme,
+    );
+    final Color backgroundSecondaryColor = colorScheme.secondary.withInversion(
+      invertColorScheme,
+    );
     final previewSize = Size(
       fixedWidth,
       pageSize.height / pageSize.width * fixedWidth,

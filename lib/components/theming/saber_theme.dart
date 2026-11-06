@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:saber/data/constants.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:sbn/font_fallbacks.dart';
 import 'package:yaru/yaru.dart';
@@ -182,7 +183,7 @@ abstract class _Components {
         borderRadius: const .all(.circular(kYaruContainerRadius)),
         side: BorderSide(
           color: colorScheme.onSurface.withValues(alpha: 0.12),
-          width: 2,
+          width: kSaberBorderWidth,
         ),
       ),
     );
@@ -199,6 +200,14 @@ extension SaberThemePlatform on TargetPlatform {
   bool get isCupertino => switch (this) {
     .iOS => true,
     .macOS => true,
+    _ => false,
+  };
+
+  /// Whether this platform uses Material design natively
+  /// (as opposed to Yaru on desktop or Cupertino on Apple platforms).
+  bool get isMaterialNative => switch (this) {
+    .android => true,
+    .fuchsia => true,
     _ => false,
   };
 }

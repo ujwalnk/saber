@@ -7,6 +7,7 @@ import 'package:saber/components/canvas/_stroke.dart';
 import 'package:saber/components/canvas/inner_canvas.dart';
 import 'package:saber/components/canvas/invert_widget.dart';
 import 'package:saber/components/home/note_cover_colors.dart';
+import 'package:saber/data/constants.dart';
 import 'package:saber/components/home/sync_indicator.dart';
 import 'package:saber/data/extensions/color_extensions.dart';
 import 'package:saber/data/file_manager/file_manager.dart';
@@ -146,7 +147,7 @@ class _PreviewCardState extends State<PreviewCard> {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: noteColor,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(kSaberCardRadius),
           ),
           child: Column(
             mainAxisSize: stows.homeLayout.value.fillVertical ? .max : .min,
@@ -155,7 +156,7 @@ class _PreviewCardState extends State<PreviewCard> {
                 fit: stows.homeLayout.value.fillVertical ? .tight : .loose,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(kSaberCardRadius),
                     boxShadow: noteColor == null
                         ? [
                             BoxShadow(
@@ -167,7 +168,7 @@ class _PreviewCardState extends State<PreviewCard> {
                         : null,
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(kSaberCardRadius),
                     child: Stack(
                       children: [
                         Positioned.fill(
@@ -293,9 +294,9 @@ class _PreviewCardState extends State<PreviewCard> {
               color: expanded
                   ? colorScheme.primary
                   : colorScheme.onSurface.withValues(alpha: 0.12),
-              width: 2,
+              width: kSaberBorderWidth,
             ),
-            borderRadius: const .all(.circular(18)),
+            borderRadius: const .all(.circular(kSaberCardRadius)),
           ),
           closedElevation: 0,
           closedBuilder: (context, action) => card,

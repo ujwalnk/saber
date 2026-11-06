@@ -110,8 +110,10 @@ class SvgEditorImage extends EditorImage {
     assert(!json.containsKey('a'));
     assert(!json.containsKey('b'));
 
-    final svgData = _extractSvg();
-    json['a'] = assets.add(svgData.string ?? svgData.file!);
+    final (string: svgString, file: svgFile) = _extractSvg();
+    json['a'] = svgString != null
+        ? assets.addString(svgString)
+        : assets.addFile(svgFile!);
 
     return json;
   }
