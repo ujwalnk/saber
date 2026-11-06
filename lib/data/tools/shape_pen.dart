@@ -27,6 +27,10 @@ class ShapePen extends Pen {
 
   static final log = Logger('ShapePen');
 
+  /// The shape pen already snaps to a shape on every stroke.
+  @override
+  bool get snapOnHold => false;
+
   static const shapePenIcon = FontAwesomeIcons.shapes;
 
   static RecognizedUnistroke? detectedShape;

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:one_dollar_unistroke_recognizer/one_dollar_unistroke_recognizer.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
@@ -68,6 +71,14 @@ class Pen extends Tool {
   bool pressureEnabled;
   StrokeOptions options;
 
+  /// The most recently active writing tool of any kind (ink pen, ballpoint,
+  /// pencil, marker, highlighter or shape pen). The toolbar's pen button
+  /// returns to this after another tool (e.g. the eraser) was used.
+  static Pen? lastUsedPen;
+
+  /// The tool the toolbar's pen button activates.
+  static Pen get activePen => lastUsedPen ?? _currentPen;
+
   static var _currentPen = Pen.fountainPen();
   static Pen get currentPen => _currentPen;
   static set currentPen(Pen currentPen) {
@@ -86,6 +97,8 @@ class Pen extends Tool {
     int pageIndex,
     double? pressure,
   ) {
+    _resetHold();
+    _holdPage = page;
     currentStroke = Stroke(
       color: color,
       pressureEnabled: pressureEnabled,
@@ -100,51 +113,122 @@ class Pen extends Tool {
 
   void onDragUpdate(Offset position, double? pressure) {
     currentStroke?.addPoint(position, pressure);
+    _trackHold(position);
   }
 
   Stroke? onDragEnd() {
     final stroke = currentStroke;
     currentStroke = null;
+    final heldShape = holdDetectedShape;
+    _resetHold();
     if (stroke == null) return null;
 
     stroke
       ..options.isComplete = true
       ..markPolygonNeedsUpdating();
 
-    // Samsung-style automatic shape snap: if a fountain/ballpoint stroke
-    // looks like a geometric shape with high confidence, replace it with
-    // the clean shape. Always on, no toggle — but conservative so
-    // handwriting is never mangled.
-    if (toolId == .fountainPen || toolId == .ballpointPen) {
-      final snapped = _trySnapToShape(stroke);
+    // Strokes are left exactly as drawn, unless the pen was held still at
+    // the end of the stroke (see [_trackHold]) and a shape was recognised.
+    if (heldShape != null) {
+      final snapped = _snapToShape(stroke, heldShape);
       if (snapped != null) return snapped;
     }
 
     return stroke;
   }
 
+  // --- Hold to snap -------------------------------------------------------
+
+  /// Whether holding the pen still at the end of a stroke snaps the stroke
+  /// to a shape. The shape pen has its own always-on recognition.
+  @protected
+  bool get snapOnHold => true;
+
   /// Minimum bounding-box diagonal (logical pixels) for a stroke to be
-  /// considered for shape snapping. Filters out handwriting fragments,
-  /// dots, and small marks.
-  static const _minShapeSnapDiagonal = 48.0;
+  /// considered for shape snapping. Filters out dots and tiny marks.
+  static const _minShapeSnapDiagonal = 24.0;
 
-  /// Minimum $1 recognizer score (0.0–1.0) to snap. Deliberately high:
-  /// handwriting rarely scores this well against geometric templates.
-  static const _minShapeSnapScore = 0.8;
+  /// Minimum $1 recognizer score (0.0-1.0) to snap.
+  static const _minShapeSnapScore = 0.7;
 
-  /// Returns a clean geometric stroke if [stroke] confidently matches a
-  /// shape, otherwise null (keep the raw stroke).
-  Stroke? _trySnapToShape(Stroke stroke) {
-    // Size filter: ignore small strokes (handwriting fragments, dots).
-    if (stroke.boundingBoxDiagonal < _minShapeSnapDiagonal) return null;
+  /// How far (logical pixels) the pen may drift and still count as "held
+  /// still". Absorbs stylus / hand jitter.
+  static const _holdMoveTolerance = 5.0;
+
+  /// The shape the current stroke will snap to when the pen is lifted, or
+  /// null if the stroke will be kept as drawn. Drawn as a preview.
+  static RecognizedUnistroke? holdDetectedShape;
+
+  static Timer? _holdTimer;
+  static Offset? _holdAnchor;
+  static EditorPage? _holdPage;
+
+  /// The configured hold time, or null if hold-to-snap is turned off.
+  static Duration? get holdDelay {
+    if (!stows.holdToSnapDelay.loaded) return null;
+    final ms = stows.holdToSnapDelay.value;
+    return ms < 0 ? null : Duration(milliseconds: ms);
+  }
+
+  /// Called for every point. While the pen stays within
+  /// [_holdMoveTolerance] of [_holdAnchor] the timer keeps running; moving
+  /// further drops any pending snap and restarts the wait.
+  void _trackHold(Offset position) {
+    if (!snapOnHold) return;
+    final delay = holdDelay;
+    if (delay == null) return;
+
+    final anchor = _holdAnchor;
+    if (anchor != null && (position - anchor).distance <= _holdMoveTolerance) {
+      return; // still holding
+    }
+
+    _holdAnchor = position;
+    _holdTimer?.cancel();
+    if (holdDetectedShape != null) {
+      holdDetectedShape = null;
+      _holdPage?.redrawStrokes();
+    }
+    _holdTimer = Timer(delay, _onHold);
+  }
+
+  static void _onHold() {
+    final stroke = currentStroke;
+    if (stroke == null) return;
+    if (stroke.boundingBoxDiagonal < _minShapeSnapDiagonal) return;
 
     final detected = stroke.detectShape();
-    if (detected == null || detected.score < _minShapeSnapScore) return null;
+    if (detected == null ||
+        detected.name == null ||
+        detected.score < _minShapeSnapScore) {
+      return;
+    }
 
+    holdDetectedShape = detected;
+    HapticFeedback.selectionClick();
+    _holdPage?.redrawStrokes();
+  }
+
+  static void _resetHold() {
+    _holdTimer?.cancel();
+    _holdTimer = null;
+    _holdAnchor = null;
+    holdDetectedShape = null;
+  }
+
+  /// Drops any pending hold-to-snap (e.g. when a stroke is abandoned).
+  static void cancelHold() {
+    final hadShape = holdDetectedShape != null;
+    _resetHold();
+    if (hadShape) _holdPage?.redrawStrokes();
+  }
+
+  /// Replaces [stroke] with the clean version of [detected]. The result
+  /// matches the preview drawn while holding.
+  Stroke? _snapToShape(Stroke stroke, RecognizedUnistroke detected) {
     switch (detected.name) {
       case DefaultUnistrokeNames.line:
-        // "Only straighten highlighter lines": keep pen lines as drawn.
-        if (stows.autoStraightenHighlighterOnly.value) return null;
+        if (stroke.points.length < 2) return null;
         return stroke..convertToLine();
       case DefaultUnistrokeNames.rectangle:
         return RectangleStroke(
@@ -178,22 +262,10 @@ class Pen extends Tool {
           page: stroke.page,
           toolId: toolId,
           nib: stroke.nib,
-        )..addPoints(_boundingBoxTriangle(stroke));
+        )..addPoints(detected.convertToCanonicalPolygon());
       default:
         return null;
     }
-  }
-
-  /// Builds a clean triangle from the stroke's bounding box: apex at the
-  /// top-center, base along the bottom. Simple and predictable — always
-  /// looks like the triangle the user drew.
-  List<Offset> _boundingBoxTriangle(Stroke stroke) {
-    final box = stroke.boundingBox;
-    final apex = Offset(box.center.dx, box.top);
-    final baseLeft = Offset(box.left, box.bottom);
-    final baseRight = Offset(box.right, box.bottom);
-    // Closed path: apex -> baseLeft -> baseRight -> apex
-    return [apex, baseLeft, baseRight, apex];
   }
 
   /// The default stroke options.

@@ -13,6 +13,7 @@ import 'package:saber/data/extensions/color_extensions.dart';
 import 'package:saber/data/tools/highlighter.dart';
 import 'package:saber/data/tools/laser_pointer.dart';
 import 'package:saber/data/tools/select.dart';
+import 'package:saber/data/tools/pen.dart';
 import 'package:saber/data/tools/shape_pen.dart';
 
 class CanvasPainter extends CustomPainter {
@@ -120,7 +121,9 @@ class CanvasPainter extends CustomPainter {
       paint.maskFilter = null;
       if (stroke.toolId == .pencil) {
         if (shouldUsePencilShader(stroke.options.size)) {
-          paint.color = Colors.white;
+          // The shader only receives rgb: the paint's alpha scales its
+          // output, which is how pencil opacity is applied.
+          paint.color = Colors.white.withValues(alpha: color.a);
           paint.shader = page.pencilShader
             ..setFloat(0, color.r)
             ..setFloat(1, color.g)
@@ -129,7 +132,11 @@ class CanvasPainter extends CustomPainter {
         } else {
           // Fast imitation of pencil when zoomed out
           final background = invert ? Colors.black : Colors.white;
-          paint.color = Color.lerp(background, color, 0.6)!;
+          paint.color = Color.lerp(
+            background,
+            color.withValues(alpha: 1),
+            0.6,
+          )!.withValues(alpha: color.a);
         }
       }
 
@@ -173,7 +180,7 @@ class CanvasPainter extends CustomPainter {
     paint.shader = null;
     paint.maskFilter = null;
     if (currentStroke!.toolId == .pencil) {
-      paint.color = Colors.white;
+      paint.color = Colors.white.withValues(alpha: color.a);
       paint.shader = page.pencilShader
         ..setFloat(0, color.r)
         ..setFloat(1, color.g)
@@ -208,7 +215,8 @@ class CanvasPainter extends CustomPainter {
   }
 
   void _drawDetectedShape(Canvas canvas) {
-    final shape = ShapePen.detectedShape;
+    // Shape pen preview, or the shape a held stroke will snap to.
+    final shape = ShapePen.detectedShape ?? Pen.holdDetectedShape;
     if (shape == null) return;
 
     final color = currentStroke?.color.withInversion(invert) ?? Colors.black;

@@ -183,6 +183,15 @@ class Stows {
     500,
     volatile: !_isOnMainIsolate,
   );
+
+  /// How long (ms) the pen must be held still at the end of a stroke, without
+  /// lifting, before the stroke snaps to the shape / line it resembles.
+  /// Negative disables hold-to-snap: strokes are always left as drawn.
+  final holdToSnapDelay = PlainStow(
+    'holdToSnapDelay',
+    600,
+    volatile: !_isOnMainIsolate,
+  );
   final autoStraightenLines = PlainStow(
     'autoStraightenLines',
     true,

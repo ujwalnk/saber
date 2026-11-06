@@ -148,7 +148,7 @@ class EditorState extends State<Editor> {
 
   late bool needsNaming = widget.needsNaming && stows.editorPromptRename.value;
 
-  late Tool _currentTool = () {
+  late Tool _currentTool = _rememberPen(() {
     switch (stows.lastTool.value) {
       case .fountainPen:
         if (Pen.currentPen.toolId != stows.lastTool.value) {
@@ -178,12 +178,19 @@ class EditorState extends State<Editor> {
       case .laserPointer:
         return LaserPointer.currentLaserPointer;
     }
-  }();
+  }());
+
+  static Tool _rememberPen(Tool tool) {
+    if (tool is Pen) Pen.lastUsedPen = tool;
+    return tool;
+  }
+
   Tool get currentTool => _currentTool;
   set currentTool(Tool tool) {
     _currentTool = tool;
     _selectionPopupRect.value = null;
     if (tool is! Eraser) _lastNonEraserTool = tool;
+    if (tool is Pen) Pen.lastUsedPen = tool;
     _eraserCircle.value = null;
     stows.lastTool.value = tool.toolId;
   }
@@ -203,7 +210,7 @@ class EditorState extends State<Editor> {
   final ValueNotifier<bool> showExportOptions = ValueNotifier(false);
 
   /// The last non-Eraser [currentTool] value.
-  late Tool _lastNonEraserTool = Pen.currentPen;
+  late Tool _lastNonEraserTool = Pen.activePen;
 
   /// Where the eraser circle is drawn, in the canvas area's coordinates,
   /// and its radius on screen. Null when the circle is hidden.
@@ -1607,21 +1614,6 @@ class EditorState extends State<Editor> {
         if (newStroke == null) return;
         if (newStroke.isEmpty) return;
 
-        if (currentTool is! ShapePen) {
-          if (stows.autoStraightenHighlighterOnly.value) {
-            // Highlighter strokes are always straightened, whatever their
-            // length or shape. Pens and pencil are left exactly as drawn.
-            if (newStroke.toolId == .highlighter &&
-                newStroke.points.length >= 2 &&
-                newStroke.points.first != newStroke.points.last) {
-              newStroke.convertToLine();
-            }
-          } else if (stows.autoStraightenLines.value &&
-              newStroke.isStraightLine()) {
-            newStroke.convertToLine();
-          }
-        }
-
         createPage(newStroke.pageIndex);
         page.insertStroke(newStroke);
         history.recordChange(
@@ -2565,7 +2557,9 @@ class EditorState extends State<Editor> {
                     Highlighter.alpha,
                   );
                 } else if (currentTool is Pen) {
-                  (currentTool as Pen).color = color;
+                  // picking a colour keeps the pen's opacity
+                  final pen = currentTool as Pen;
+                  pen.color = color.withValues(alpha: pen.color.a);
                 } else if (currentTool is Select) {
                   // Changes color of selected strokes
                   final select = currentTool as Select;
@@ -2600,7 +2594,7 @@ class EditorState extends State<Editor> {
             textEditing: currentTool == Tool.textEditing,
             toggleTextEditing: () => setState(() {
               if (currentTool == Tool.textEditing) {
-                currentTool = Pen.currentPen;
+                currentTool = Pen.activePen;
                 for (final page in coreInfo.pages) {
                   // unselect text, but maintain cursor position
                   page.quill.controller.moveCursorToPosition(

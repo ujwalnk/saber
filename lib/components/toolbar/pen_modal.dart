@@ -3,8 +3,10 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:saber/components/toolbar/nib_settings_panel.dart';
 import 'package:saber/components/toolbar/samsung_panel.dart';
 import 'package:saber/components/toolbar/size_picker.dart';
+import 'package:saber/components/toolbar/step_slider.dart';
 import 'package:saber/components/toolbar/writing_tool.dart';
 import 'package:saber/data/tools/_tool.dart';
+import 'package:saber/data/tools/highlighter.dart';
 import 'package:saber/data/tools/pen.dart';
 import 'package:saber/data/tools/shape_pen.dart';
 import 'package:saber/i18n/strings.g.dart';
@@ -87,6 +89,13 @@ class _PenModalState extends State<PenModal> {
             const SizedBox(height: 4),
             _shapePenToggle(colorScheme, isShapePen),
             SizePicker(axis: Axis.horizontal, pen: currentPen),
+            // The highlighter has its own fixed transparency.
+            if (currentPen is! Highlighter)
+              _OpacityPicker(
+                // rebuild when switching tools
+                key: ValueKey(currentPen),
+                pen: currentPen,
+              ),
             if (showNibSettings) ...[
               InkWell(
                 borderRadius: BorderRadius.circular(8),
@@ -218,6 +227,62 @@ class _ToolSlot extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Opacity slider (10-100 %) for a writing tool. The opacity is the alpha of
+/// the pen's colour, so it applies to every stroke drawn afterwards and is
+/// kept when the colour is changed.
+class _OpacityPicker extends StatefulWidget {
+  const _OpacityPicker({super.key, required this.pen});
+
+  final Pen pen;
+
+  @override
+  State<_OpacityPicker> createState() => _OpacityPickerState();
+}
+
+class _OpacityPickerState extends State<_OpacityPicker> {
+  static const double _min = 0.1, _max = 1, _step = 0.05;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = ColorScheme.of(context);
+    final opacity = widget.pen.color.a.clamp(_min, _max);
+    final percent = (opacity * 100).round();
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 44,
+          child: Column(
+            children: [
+              Text(
+                'Opacity',
+                style: TextStyle(
+                  color: colorScheme.onSurface.withValues(alpha: 0.8),
+                  fontSize: 10,
+                  height: 1,
+                ),
+              ),
+              Text('$percent%'),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: StepSlider(
+            value: opacity,
+            min: _min,
+            max: _max,
+            step: _step,
+            onChanged: (v) => setState(() {
+              widget.pen.color = widget.pen.color.withValues(alpha: v);
+            }),
+          ),
+        ),
+      ],
     );
   }
 }

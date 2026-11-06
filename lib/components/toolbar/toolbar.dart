@@ -15,6 +15,7 @@ import 'package:saber/components/toolbar/pen_modal.dart';
 import 'package:saber/components/toolbar/size_picker.dart';
 import 'package:saber/components/toolbar/toolbar_button.dart';
 import 'package:saber/components/toolbar/toolbar_items.dart';
+import 'package:saber/components/toolbar/writing_tool.dart';
 import 'package:saber/data/editor/page.dart';
 import 'package:saber/data/extensions/color_extensions.dart';
 import 'package:saber/data/prefs.dart';
@@ -343,10 +344,8 @@ class _ToolbarState extends State<Toolbar> {
 
   /// Material Symbols glyph used for the current pen in the toolbar.
   static IconData _penSymbol(Pen pen) {
-    final icon = pen.icon;
-    if (icon == Pen.ballpointPenIcon) return Symbols.draw;
-    if (icon == ShapePen.shapePenIcon) return Symbols.shapes;
-    return Symbols.ink_pen;
+    // null for the shape pen, which isn't in the writing-tool strip
+    return WritingTool.of(pen)?.icon ?? Symbols.shapes;
   }
 
   /// A toolbar glyph: outlined normally, filled while its tool is selected.
@@ -533,7 +532,7 @@ class _ToolbarState extends State<Toolbar> {
         // The popover can switch to pencil / marker / highlighter, which
         // don't update [Pen.currentPen], so follow the active tool instead.
         getTool: () =>
-            widget.currentTool is Pen ? widget.currentTool : Pen.currentPen,
+            widget.currentTool is Pen ? widget.currentTool : Pen.activePen,
         setTool: widget.setTool,
         width: width,
       ),
@@ -618,12 +617,15 @@ class _ToolbarState extends State<Toolbar> {
     // its 3-dot menu.
     final items = <ToolbarItem, List<Widget>>{
       ToolbarItem.pen: [
+        // The pen button stands for whichever writing tool (ink pen,
+        // pencil, marker, ...) was used last, so after the eraser or
+        // another tool it goes back to that one.
         ToolbarIconButton(
-          tooltip: Pen.currentPen.name,
-          selected: widget.currentTool == Pen.currentPen,
+          tooltip: Pen.activePen.name,
+          selected: widget.currentTool is Pen,
           enabled: !widget.readOnly,
           onPressed: () {
-            if (widget.currentTool == Pen.currentPen) {
+            if (widget.currentTool is Pen) {
               if (toolOptionsType.value == .pen) {
                 toolOptionsType.value = .hide;
               } else {
@@ -631,13 +633,17 @@ class _ToolbarState extends State<Toolbar> {
               }
             } else {
               toolOptionsType.value = .hide;
-              widget.setTool(Pen.currentPen);
+              widget.setTool(Pen.activePen);
             }
           },
           padding: buttonPadding,
           child: _toolIcon(
-            _penSymbol(Pen.currentPen),
-            selected: widget.currentTool == Pen.currentPen,
+            _penSymbol(
+              widget.currentTool is Pen
+                  ? widget.currentTool as Pen
+                  : Pen.activePen,
+            ),
+            selected: widget.currentTool is Pen,
           ),
         ),
       ],

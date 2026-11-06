@@ -524,18 +524,24 @@ class _SettingsPageState extends State<SettingsPage> {
                     ShapePen.debounceDuration = ShapePen.getDebounceFromPref();
                   },
                 ),
-                SettingsSwitch(
-                  title: t.settings.prefLabels.autoStraightenLines,
-                  subtitle: t.settings.prefDescriptions.autoStraightenLines,
-                  icon: Icons.straighten,
-                  pref: stows.autoStraightenLines,
-                ),
-                SettingsSwitch(
-                  title: t.settings.prefLabels.autoStraightenHighlighterOnly,
+                SettingsSelection(
+                  title: 'Hold to snap shapes',
                   subtitle:
-                      t.settings.prefDescriptions.autoStraightenHighlighterOnly,
-                  icon: FontAwesomeIcons.highlighter,
-                  pref: stows.autoStraightenHighlighterOnly,
+                      'Draw a shape or line and keep the pen on the screen '
+                      'without moving. After this delay it snaps to a clean '
+                      'shape. Strokes you lift normally are left as drawn',
+                  icon: Icons.straighten,
+                  pref: stows.holdToSnapDelay,
+                  options: [
+                    const ToggleButtonsOption(300, Text('0.3s')),
+                    const ToggleButtonsOption(600, Text('0.6s')),
+                    const ToggleButtonsOption(1000, Text('1s')),
+                    const ToggleButtonsOption(1500, Text('1.5s')),
+                    ToggleButtonsOption(
+                      -1,
+                      Text(t.settings.shapeRecognitionDisabled),
+                    ),
+                  ],
                 ),
                 SettingsSubtitle(subtitle: t.settings.prefCategories.advanced),
                 if (isSentryAvailable) const SettingsSentryConsent(),
