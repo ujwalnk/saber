@@ -1262,7 +1262,7 @@ class Translations$editor$selectionBar$en {
 
 	// Translations
 
-	/// en: 'Copy'
+	/// en: 'Delete'
 	String get copy => 'Copy';
 
 	/// en: 'Delete'

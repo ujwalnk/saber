@@ -471,17 +471,13 @@ class EditorState extends State<Editor> {
 
     // undo puts back the original, redo puts back the transformed selection
     history.recordChange(
-      EditorHistoryItem(
-        type: .erase,
-        pageIndex: result.pageIndex,
+      HistoricDelete(
         strokes: originalStrokes,
         images: originalImages,
       ),
     );
     history.recordChange(
-      EditorHistoryItem(
-        type: .draw,
-        pageIndex: result.pageIndex,
+      HistoricAdd(
         strokes: List.of(result.strokes),
         images: List.of(result.images),
       ),
@@ -696,12 +692,9 @@ class EditorState extends State<Editor> {
     if (!changed) return;
 
     history.recordChange(
-      EditorHistoryItem(
-        type: .layerChange,
+      HistoricLayerChange(
         pageIndex: result.pageIndex,
-        strokes: const [],
-        images: const [],
-        layerChange: Change(previous: before, current: after),
+        change: Change(previous: before, current: after),
       ),
     );
     setState(() {});
@@ -875,9 +868,7 @@ class EditorState extends State<Editor> {
       );
 
       history.recordChange(
-        EditorHistoryItem(
-          type: .draw,
-          pageIndex: result.pageIndex,
+        HistoricAdd(
           strokes: duplicatedStrokes,
           images: duplicatedImages,
         ),
@@ -920,9 +911,7 @@ class EditorState extends State<Editor> {
       select.unselect();
       _selectionPopupRect.value = null;
       history.recordChange(
-        EditorHistoryItem(
-          type: .erase,
-          pageIndex: result.pageIndex,
+        HistoricDelete(
           strokes: strokes,
           images: images,
         ),
@@ -963,9 +952,7 @@ class EditorState extends State<Editor> {
       coreInfo.pages[pageIndex].strokes.addAll(strokes);
       coreInfo.pages[pageIndex].images.addAll(images);
       history.recordChange(
-        EditorHistoryItem(
-          type: .draw,
-          pageIndex: pageIndex,
+        HistoricAdd(
           strokes: strokes,
           images: images,
         ),
@@ -1208,7 +1195,11 @@ class EditorState extends State<Editor> {
     }
   }
 
-  void undo([EditorHistoryItem? item]) {
+  /// Undoes [item], which is the most recent item in the history
+  /// unless one is passed in (e.g. when redoing, which undoes the
+  /// [Historic.reverse] of an item).
+  void undo([Historic? item]) {
+    final Historic target;
     if (item == null) {
       if (!history.canUndo) return;
 
@@ -1220,95 +1211,97 @@ class EditorState extends State<Editor> {
         history.canRedo = true;
       }
 
-      item = history.undo();
+      target = history.undo();
+    } else {
+      target = item;
     }
 
     setState(() {
-      switch (item!.type) {
-        case .draw:
-          for (final stroke in item.strokes) {
+      switch (target) {
+        case HistoricAdd():
+          for (final stroke in target.strokes) {
             coreInfo.pages[stroke.pageIndex].strokes.remove(stroke);
           }
-          for (final image in item.images) {
+          for (final image in target.images) {
             coreInfo.pages[image.pageIndex].images.remove(image);
           }
           removeExcessPages();
 
-        case .erase:
-          for (final stroke in item.replacementStrokes) {
+        case HistoricDelete():
+          for (final stroke in target.replacementStrokes) {
             coreInfo.pages[stroke.pageIndex].strokes.remove(stroke);
           }
-          for (final stroke in item.strokes) {
+          for (final stroke in target.strokes) {
             createPage(stroke.pageIndex);
             coreInfo.pages[stroke.pageIndex].insertStroke(stroke);
           }
-          for (final image in item.images) {
+          for (final image in target.images) {
             createPage(image.pageIndex);
             coreInfo.pages[image.pageIndex].images.add(image);
             image.newImage = true;
           }
 
-        case .deletePage:
+        case HistoricPageDelete():
           // make sure we already have a (blank/otherwise) page at this index
-          createPage(item.pageIndex - 1);
+          createPage(target.pageIndex - 1);
 
           // insert the page at the correct index
-          coreInfo.pages.insert(item.pageIndex, item.page!);
+          coreInfo.pages.insert(target.pageIndex, target.page);
 
           // fix the page indices of all pages after this one
-          for (int i = item.pageIndex + 1; i < coreInfo.pages.length; ++i) {
+          for (int i = target.pageIndex + 1; i < coreInfo.pages.length; ++i) {
             final page = coreInfo.pages[i];
             page.updatePageIndex(i);
           }
 
-        case .insertPage:
+        case HistoricPageInsert():
           // remove the page at the given index
-          coreInfo.pages.removeAt(item.pageIndex);
+          coreInfo.pages.removeAt(target.pageIndex);
 
           // fix the page indices of all pages after this one
-          for (int i = item.pageIndex; i < coreInfo.pages.length; ++i) {
+          for (int i = target.pageIndex; i < coreInfo.pages.length; ++i) {
             final page = coreInfo.pages[i];
             page.updatePageIndex(i);
           }
 
-        case .move:
-          for (final stroke in item.strokes) {
-            stroke.shift(Offset(-item.offset!.left, -item.offset!.top));
+        case HistoricMove():
+          for (final stroke in target.strokes) {
+            stroke.shift(Offset(-target.offset.left, -target.offset.top));
           }
           final select = Select.currentSelect;
           if (select.doneSelecting) {
             select.selectResult.path = select.selectResult.path.shift(
-              Offset(-item.offset!.left, -item.offset!.top),
+              Offset(-target.offset.left, -target.offset.top),
             );
           }
-          for (final image in item.images) {
+          for (final image in target.images) {
             image.dstRect = .fromLTRB(
-              image.dstRect.left - item.offset!.left,
-              image.dstRect.top - item.offset!.top,
-              image.dstRect.right - item.offset!.right,
-              image.dstRect.bottom - item.offset!.bottom,
+              image.dstRect.left - target.offset.left,
+              image.dstRect.top - target.offset.top,
+              image.dstRect.right - target.offset.right,
+              image.dstRect.bottom - target.offset.bottom,
             );
           }
 
-        case .quillChange:
-          final quill = coreInfo.pages[item.pageIndex].quill;
+        case HistoricQuillChange():
+          final quill = coreInfo.pages[target.pageIndex].quill;
           quill.controller.undo();
 
-        case .quillUndoneChange:
-          final quill = coreInfo.pages[item.pageIndex].quill;
+        case HistoricQuillReverseChange():
+          final quill = coreInfo.pages[target.pageIndex].quill;
           quill.controller.redo();
 
-        case .changeColor:
-          for (final stroke in item.strokes) {
-            stroke.color = item.colorChange![stroke]!.previous;
+        case HistoricColorChange():
+          for (final entry in target.colorChanges.entries) {
+            entry.key.color = entry.value.previous;
           }
 
-        case .backgroundPattern:
-          coreInfo.backgroundPattern = item.backgroundPatternChange!.previous;
+        case HistoricBackgroundPatternChange():
+          coreInfo.backgroundPattern = target.change.previous;
 
-        case .layerChange:
-          final page = coreInfo.pages[item.pageIndex];
-          final layers = item.layerChange!.previous;
+        case HistoricLayerChange():
+          final page = coreInfo.pages[target.pageIndex];
+          final layers = target.change.previous;
           page.images
             ..clear()
             ..addAll([for (final layer in layers) layer.image]);
@@ -1317,13 +1310,13 @@ class EditorState extends State<Editor> {
           }
       }
 
-      if (item.type != .move) {
+      if (target is! HistoricMove) {
         Select.currentSelect.unselect();
         _selectionPopupRect.value = null;
       }
     });
 
-    if (item.type == .move) _updateSelectionPopupRect();
+    if (target is HistoricMove) _updateSelectionPopupRect();
     autosaveAfterDelay();
   }
 
@@ -1331,58 +1324,8 @@ class EditorState extends State<Editor> {
     if (!history.canRedo) return;
     final item = history.redo();
 
-    switch (item.type) {
-      case .draw:
-        undo(item.copyWith(type: .erase));
-      case .erase:
-        if (item.replacementStrokes.isEmpty) {
-          undo(item.copyWith(type: .draw));
-        } else {
-          // Redo a partial erase: bring the pieces back and remove the
-          // originals, which is the undo of the swapped item.
-          undo(
-            item.copyWith(
-              strokes: item.replacementStrokes,
-              replacementStrokes: item.strokes,
-            ),
-          );
-        }
-      case .deletePage:
-        undo(item.copyWith(type: .insertPage));
-      case .insertPage:
-        undo(item.copyWith(type: .deletePage));
-      case .move:
-        undo(
-          item.copyWith(
-            offset: .fromLTRB(
-              -item.offset!.left,
-              -item.offset!.top,
-              -item.offset!.right,
-              -item.offset!.bottom,
-            ),
-          ),
-        );
-      case .quillChange:
-        undo(item.copyWith(type: .quillUndoneChange));
-      case .quillUndoneChange: // this will never happen
-        throw Exception('history should not contain quillUndoneChange items');
-      case .changeColor:
-        undo(
-          item.copyWith(
-            colorChange: item.colorChange!.map(
-              (key, value) => MapEntry(key, value.reverse()),
-            ),
-          ),
-        );
-      case .layerChange:
-        undo(item.copyWith(layerChange: item.layerChange!.reverse()));
-      case .backgroundPattern:
-        undo(
-          item.copyWith(
-            backgroundPatternChange: item.backgroundPatternChange!.reverse(),
-          ),
-        );
-    }
+    // Redoing a change is undoing its reverse.
+    undo(item.reverse());
   }
 
   int? onWhichPageIsFocalPoint(Offset focalPoint) {
@@ -1617,9 +1560,7 @@ class EditorState extends State<Editor> {
         createPage(newStroke.pageIndex);
         page.insertStroke(newStroke);
         history.recordChange(
-          EditorHistoryItem(
-            type: .draw,
-            pageIndex: dragPageIndex!,
+          HistoricAdd(
             strokes: [newStroke],
             images: [],
           ),
@@ -1633,12 +1574,10 @@ class EditorState extends State<Editor> {
         }
         if (result.erased.isEmpty) return;
         history.recordChange(
-          EditorHistoryItem(
-            type: .erase,
-            pageIndex: dragPageIndex!,
+          HistoricDelete(
             strokes: result.erased,
-            replacementStrokes: result.added,
             images: [],
+            replacementStrokes: result.added,
           ),
         );
       } else if (currentTool is Select) {
@@ -1648,17 +1587,13 @@ class EditorState extends State<Editor> {
           // the selection was dragged across pages: undo puts the original
           // back on its page, redo puts the dropped one back
           history.recordChange(
-            EditorHistoryItem(
-              type: .erase,
-              pageIndex: _selectionOriginPage!,
+            HistoricDelete(
               strokes: _originStrokes!,
               images: _originImages!,
             ),
           );
           history.recordChange(
-            EditorHistoryItem(
-              type: .draw,
-              pageIndex: dragPageIndex!,
+            HistoricAdd(
               strokes: List.of(select.selectResult.strokes),
               images: List.of(select.selectResult.images),
             ),
@@ -1669,8 +1604,7 @@ class EditorState extends State<Editor> {
           _updateSelectionPopupRect();
         } else if (select.doneSelecting) {
           history.recordChange(
-            EditorHistoryItem(
-              type: .move,
+            HistoricMove(
               pageIndex: dragPageIndex!,
               strokes: select.selectResult.strokes,
               images: select.selectResult.images,
@@ -1750,8 +1684,7 @@ class EditorState extends State<Editor> {
 
   void onMoveImage(EditorImage image, Rect offset) {
     history.recordChange(
-      EditorHistoryItem(
-        type: .move,
+      HistoricMove(
         pageIndex: image.pageIndex,
         strokes: [],
         images: [image],
@@ -1765,9 +1698,7 @@ class EditorState extends State<Editor> {
 
   void onDeleteImage(EditorImage image) {
     history.recordChange(
-      EditorHistoryItem(
-        type: .erase,
-        pageIndex: image.pageIndex,
+      HistoricDelete(
         strokes: [],
         images: [image],
       ),
@@ -1815,19 +1746,16 @@ class EditorState extends State<Editor> {
     // so compare the "before" of each change to merge them
     if (history.canUndo && !history.canRedo) {
       final lastChange = history.peekUndo();
-      if (lastChange.type == .quillChange &&
+      if (lastChange is HistoricQuillChange &&
           lastChange.pageIndex == pageIndex &&
-          lastChange.quillChange!.before == event.before) {
+          lastChange.quillChange.before == event.before) {
         history.undo(); // remove the last change, to be replaced
       }
     }
 
     history.recordChange(
-      EditorHistoryItem(
-        type: .quillChange,
+      HistoricQuillChange(
         pageIndex: pageIndex,
-        strokes: const [],
-        images: const [],
         quillChange: event,
       ),
     );
@@ -2118,9 +2046,7 @@ class EditorState extends State<Editor> {
     ];
 
     history.recordChange(
-      EditorHistoryItem(
-        type: .draw,
-        pageIndex: currentPageIndex,
+      HistoricAdd(
         strokes: [],
         images: images,
       ),
@@ -2292,11 +2218,8 @@ class EditorState extends State<Editor> {
       coreInfo.pages.add(page);
       // TODO(adil192): Group multiple pages into one atomic change
       history.recordChange(
-        EditorHistoryItem(
-          type: .insertPage,
+        HistoricPageInsert(
           pageIndex: coreInfo.pages.length - 1,
-          strokes: const [],
-          images: const [],
           page: page,
         ),
       );
@@ -2576,12 +2499,9 @@ class EditorState extends State<Editor> {
                       }
 
                       history.recordChange(
-                        EditorHistoryItem(
-                          type: .changeColor,
+                        HistoricColorChange(
                           pageIndex: select.selectResult.pageIndex,
-                          strokes: strokes,
-                          colorChange: colorChange,
-                          images: [],
+                          colorChanges: colorChange,
                         ),
                       );
                       autosaveAfterDelay();
@@ -3025,15 +2945,12 @@ class EditorState extends State<Editor> {
         coreInfo.backgroundPattern = pattern;
         stows.lastBackgroundPattern.value = pattern;
         history.recordChange(
-          EditorHistoryItem(
-            type: .backgroundPattern,
+          HistoricBackgroundPatternChange(
             pageIndex: currentPageIndex,
-            backgroundPatternChange: Change(
+            change: Change(
               previous: previous,
               current: pattern,
             ),
-            strokes: [],
-            images: [],
           ),
         );
         autosaveAfterDelay();
@@ -3170,11 +3087,8 @@ class EditorState extends State<Editor> {
         coreInfo.pages.insert(pageIndex + 1, newPage);
         listenToQuillChanges(newPage.quill, pageIndex + 1);
         history.recordChange(
-          EditorHistoryItem(
-            type: .insertPage,
+          HistoricPageInsert(
             pageIndex: pageIndex,
-            strokes: const [],
-            images: const [],
             page: newPage,
           ),
         );
@@ -3186,11 +3100,8 @@ class EditorState extends State<Editor> {
         final page = coreInfo.pages.removeAt(pageIndex);
         createPage(pageIndex - 1);
         history.recordChange(
-          EditorHistoryItem(
-            type: .deletePage,
+          HistoricPageDelete(
             pageIndex: pageIndex,
-            strokes: const [],
-            images: const [],
             page: page,
           ),
         );
@@ -3206,11 +3117,8 @@ class EditorState extends State<Editor> {
     coreInfo.pages.insert(pageIndex + 1, page);
     listenToQuillChanges(page.quill, pageIndex + 1);
     history.recordChange(
-      EditorHistoryItem(
-        type: .insertPage,
+      HistoricPageInsert(
         pageIndex: pageIndex + 1,
-        strokes: const [],
-        images: const [],
         page: page,
       ),
     );
@@ -3227,9 +3135,7 @@ class EditorState extends State<Editor> {
       page.images.clear();
       removeExcessPages();
       history.recordChange(
-        EditorHistoryItem(
-          type: .erase,
-          pageIndex: pageIndex,
+        HistoricDelete(
           strokes: removedStrokes,
           images: removedImages,
         ),
@@ -3251,9 +3157,7 @@ class EditorState extends State<Editor> {
       }
       removeExcessPages();
       history.recordChange(
-        EditorHistoryItem(
-          type: .erase,
-          pageIndex: 0,
+        HistoricDelete(
           strokes: removedStrokes,
           images: removedImages,
         ),
