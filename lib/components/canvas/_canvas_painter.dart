@@ -119,11 +119,13 @@ class CanvasPainter extends CustomPainter {
       paint.color = color;
       paint.shader = null;
       paint.maskFilter = null;
+      double? pencilOpacity;
       if (stroke.toolId == .pencil) {
         if (shouldUsePencilShader(stroke.options.size)) {
-          // The shader only receives rgb: the paint's alpha scales its
-          // output, which is how pencil opacity is applied.
-          paint.color = Colors.white.withValues(alpha: color.a);
+          // The shader only receives rgb and ignores the paint's alpha,
+          // so opacity is applied by drawing into a translucent layer.
+          pencilOpacity = color.a;
+          paint.color = Colors.white;
           paint.shader = page.pencilShader
             ..setFloat(0, color.r)
             ..setFloat(1, color.g)
@@ -160,10 +162,33 @@ class CanvasPainter extends CustomPainter {
           stroke.fountainPenDotRadius,
           paint,
         );
+      } else if (pencilOpacity != null && pencilOpacity < 1) {
+        final path = _selectPath(stroke);
+        _drawWithOpacity(
+          canvas,
+          path.getBounds().inflate(stroke.options.size + 8),
+          pencilOpacity,
+          () => canvas.drawPath(path, paint),
+        );
       } else {
         canvas.drawPath(_selectPath(stroke), paint);
       }
     }
+  }
+
+  /// Runs [draw] inside a layer that is composited with the given [opacity].
+  void _drawWithOpacity(
+    Canvas canvas,
+    Rect bounds,
+    double opacity,
+    VoidCallback draw,
+  ) {
+    canvas.saveLayer(
+      bounds,
+      Paint()..color = Colors.white.withValues(alpha: opacity),
+    );
+    draw();
+    canvas.restore();
   }
 
   void _drawCurrentStroke(Canvas canvas) {
@@ -179,8 +204,10 @@ class CanvasPainter extends CustomPainter {
     paint.color = color;
     paint.shader = null;
     paint.maskFilter = null;
+    double? pencilOpacity;
     if (currentStroke!.toolId == .pencil) {
-      paint.color = Colors.white.withValues(alpha: color.a);
+      pencilOpacity = color.a;
+      paint.color = Colors.white;
       paint.shader = page.pencilShader
         ..setFloat(0, color.r)
         ..setFloat(1, color.g)
@@ -198,7 +225,17 @@ class CanvasPainter extends CustomPainter {
     }
 
     // Current stroke always uses high quality
-    canvas.drawPath(currentStroke!.highQualityPath, paint);
+    final path = currentStroke!.highQualityPath;
+    if (pencilOpacity != null && pencilOpacity < 1) {
+      _drawWithOpacity(
+        canvas,
+        path.getBounds().inflate(currentStroke!.options.size + 8),
+        pencilOpacity,
+        () => canvas.drawPath(path, paint),
+      );
+    } else {
+      canvas.drawPath(path, paint);
+    }
   }
 
   void _drawLaserStroke(Canvas canvas, LaserStroke stroke) {

@@ -21,7 +21,7 @@ class const AppInfo({super.key}) extends StatelessWidget {
     'https://github.com/saber-notes/saber/blob/main/LICENSE.md',
   );
   static final Uri releasesUrl = Uri.parse(
-    'https://github.com/saber-notes/saber/releases',
+    'https://github.com/ujwalnk/saber/releases',
   );
 
   static String get info => [

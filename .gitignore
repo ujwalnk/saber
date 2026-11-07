@@ -69,3 +69,4 @@ coverage/
 
 # Local build outputs
 android/build/
+lib.zip
