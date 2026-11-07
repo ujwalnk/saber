@@ -454,6 +454,109 @@ class Stroke {
     options.end.taperEnabled = false;
   }
 
+  /// How far this stroke strays from the straight line between its first and
+  /// last point, as a fraction of that line's length. Close to 0 for a
+  /// straight line, larger for curves.
+  double get chordDeviationRatio {
+    if (points.length < 3) return 0;
+    final a = Offset(points.first.dx, points.first.dy);
+    final b = Offset(points.last.dx, points.last.dy);
+    final chord = b - a;
+    final chordLength = chord.distance;
+    if (chordLength < 1e-6) return double.infinity; // closed loop
+    var maxDeviation = 0.0;
+    for (final point in points) {
+      final v = Offset(point.dx, point.dy) - a;
+      final deviation = (v.dx * chord.dy - v.dy * chord.dx).abs() / chordLength;
+      if (deviation > maxDeviation) maxDeviation = deviation;
+    }
+    return maxDeviation / chordLength;
+  }
+
+  /// A smoothed version of this stroke's path: the hand-drawn wobble is
+  /// removed but the overall shape and both end points are kept.
+  /// Returns null if the stroke is too short to smooth.
+  List<Offset>? smoothedCurve() {
+    // 1. drop duplicate / invalid points
+    final raw = <Offset>[];
+    for (final point in points) {
+      final offset = Offset(point.dx, point.dy);
+      if (!offset.isFinite) continue;
+      if (raw.isEmpty || (offset - raw.last).distance > 0.01) raw.add(offset);
+    }
+    if (raw.length < 3) return null;
+
+    var totalLength = 0.0;
+    for (var i = 1; i < raw.length; i++) {
+      totalLength += (raw[i] - raw[i - 1]).distance;
+    }
+    if (totalLength < 1) return null;
+
+    // 2. resample at an even spacing (about 2 logical pixels)
+    final count = (totalLength / 2).round().clamp(8, 600);
+    final step = totalLength / (count - 1);
+    final resampled = <Offset>[raw.first];
+    var target = step;
+    var travelled = 0.0;
+    for (var i = 1; i < raw.length && resampled.length < count - 1; i++) {
+      final a = raw[i - 1], b = raw[i];
+      final segment = (b - a).distance;
+      while (travelled + segment >= target && resampled.length < count - 1) {
+        resampled.add(Offset.lerp(a, b, (target - travelled) / segment)!);
+        target += step;
+      }
+      travelled += segment;
+    }
+    resampled.add(raw.last);
+
+    // 3. gaussian smoothing. The path is mirrored about its end points so
+    // that they stay exactly where they were drawn.
+    final n = resampled.length;
+    final sigma = (n * 0.05).clamp(2.0, 25.0);
+    final radius = min((sigma * 3).ceil(), n - 1);
+    final weights = [
+      for (var k = -radius; k <= radius; k++)
+        exp(-(k * k) / (2 * sigma * sigma)),
+    ];
+    final weightSum = weights.reduce((a, b) => a + b);
+
+    Offset sample(int j) {
+      if (j < 0) return resampled.first * 2 - resampled[-j];
+      if (j > n - 1) return resampled.last * 2 - resampled[2 * (n - 1) - j];
+      return resampled[j];
+    }
+
+    return [
+      for (var i = 0; i < n; i++)
+        () {
+          var sum = Offset.zero;
+          for (var k = -radius; k <= radius; k++) {
+            sum += sample(i + k) * weights[k + radius];
+          }
+          return sum / weightSum;
+        }(),
+    ];
+  }
+
+  /// Replaces the points in this stroke with a smoothed version of the
+  /// curve it was drawn as (see [smoothedCurve]).
+  void convertToSmoothCurve() {
+    final curve = smoothedCurve();
+    if (curve == null) return;
+
+    // Use the average pressure so the smoothed line has an even width
+    final pressure = points.map((point) => point.pressure ?? 0.5).average;
+    points.clear();
+    points.addAll(
+      curve.map(
+        (offset) => PointVector.fromOffset(offset: offset, pressure: pressure),
+      ),
+    );
+    options.isComplete = true;
+    options.simulatePressure = false;
+    markPolygonNeedsUpdating();
+  }
+
   /// Snaps a line to either horizontal or vertical
   /// if the angle is close enough.
   static (PointVector firstPoint, PointVector lastPoint) snapLine(

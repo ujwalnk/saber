@@ -120,6 +120,7 @@ class Pen extends Tool {
     final stroke = currentStroke;
     currentStroke = null;
     final heldShape = holdDetectedShape;
+    final heldCurve = holdSmoothedCurve;
     _resetHold();
     if (stroke == null) return null;
 
@@ -132,6 +133,9 @@ class Pen extends Tool {
     if (heldShape != null) {
       final snapped = _snapToShape(stroke, heldShape);
       if (snapped != null) return snapped;
+    } else if (heldCurve != null) {
+      // No shape matched, but the pen was held: smooth the curve.
+      stroke.convertToSmoothCurve();
     }
 
     return stroke;
@@ -159,6 +163,15 @@ class Pen extends Tool {
   /// null if the stroke will be kept as drawn. Drawn as a preview.
   static RecognizedUnistroke? holdDetectedShape;
 
+  /// Set instead of [holdDetectedShape] when the held stroke is not a known
+  /// shape: the smoothed curve the stroke will be replaced with.
+  static List<Offset>? holdSmoothedCurve;
+
+  /// A line is only snapped to if the stroke really is nearly straight
+  /// (deviation from the chord, as a fraction of the chord's length).
+  /// Anything more curved than this is smoothed into a curve instead.
+  static const _maxLineChordDeviation = 0.05;
+
   static Timer? _holdTimer;
   static Offset? _holdAnchor;
   static EditorPage? _holdPage;
@@ -185,8 +198,9 @@ class Pen extends Tool {
 
     _holdAnchor = position;
     _holdTimer?.cancel();
-    if (holdDetectedShape != null) {
+    if (holdDetectedShape != null || holdSmoothedCurve != null) {
       holdDetectedShape = null;
+      holdSmoothedCurve = null;
       _holdPage?.redrawStrokes();
     }
     _holdTimer = Timer(delay, _onHold);
@@ -198,13 +212,24 @@ class Pen extends Tool {
     if (stroke.boundingBoxDiagonal < _minShapeSnapDiagonal) return;
 
     final detected = stroke.detectShape();
-    if (detected == null ||
-        detected.name == null ||
-        detected.score < _minShapeSnapScore) {
-      return;
-    }
+    final isShape =
+        detected != null &&
+        detected.name != null &&
+        detected.score >= _minShapeSnapScore &&
+        // a gentle curve can score well as a line: only snap real lines
+        (detected.name != DefaultUnistrokeNames.line ||
+            stroke.chordDeviationRatio <= _maxLineChordDeviation);
 
-    holdDetectedShape = detected;
+    if (isShape) {
+      holdSmoothedCurve = null;
+      holdDetectedShape = detected;
+    } else {
+      // Not a known shape: smooth the curve instead.
+      final curve = stroke.smoothedCurve();
+      if (curve == null) return;
+      holdDetectedShape = null;
+      holdSmoothedCurve = curve;
+    }
     HapticFeedback.selectionClick();
     _holdPage?.redrawStrokes();
   }
@@ -214,11 +239,12 @@ class Pen extends Tool {
     _holdTimer = null;
     _holdAnchor = null;
     holdDetectedShape = null;
+    holdSmoothedCurve = null;
   }
 
   /// Drops any pending hold-to-snap (e.g. when a stroke is abandoned).
   static void cancelHold() {
-    final hadShape = holdDetectedShape != null;
+    final hadShape = holdDetectedShape != null || holdSmoothedCurve != null;
     _resetHold();
     if (hadShape) _holdPage?.redrawStrokes();
   }

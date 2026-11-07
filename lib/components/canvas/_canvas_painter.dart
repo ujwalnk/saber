@@ -254,7 +254,10 @@ class CanvasPainter extends CustomPainter {
   void _drawDetectedShape(Canvas canvas) {
     // Shape pen preview, or the shape a held stroke will snap to.
     final shape = ShapePen.detectedShape ?? Pen.holdDetectedShape;
-    if (shape == null) return;
+    if (shape == null) {
+      _drawHeldCurve(canvas);
+      return;
+    }
 
     final color = currentStroke?.color.withInversion(invert) ?? Colors.black;
     final shapePaint = Paint()
@@ -287,6 +290,23 @@ class CanvasPainter extends CustomPainter {
         final polygon = shape.convertToCanonicalPolygon();
         canvas.drawPath(Path()..addPolygon(polygon, true), shapePaint);
     }
+  }
+
+  /// Preview of the smoothed curve a held stroke will snap to.
+  void _drawHeldCurve(Canvas canvas) {
+    final curve = Pen.holdSmoothedCurve;
+    if (curve == null || curve.length < 2) return;
+
+    final color = currentStroke?.color.withInversion(invert) ?? Colors.black;
+    canvas.drawPath(
+      Path()..addPolygon(curve, false),
+      Paint()
+        ..color = Color.lerp(color, primaryColor, 0.5)!.withValues(alpha: 0.7)
+        ..style = .stroke
+        ..strokeCap = .round
+        ..strokeJoin = .round
+        ..strokeWidth = currentStroke?.options.size ?? 3,
+    );
   }
 
   void _drawSelection(Canvas canvas) {
