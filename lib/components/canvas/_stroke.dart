@@ -515,8 +515,7 @@ class Stroke {
     final sigma = (n * 0.05).clamp(2.0, 25.0);
     final radius = min((sigma * 3).ceil(), n - 1);
     final weights = [
-      for (var k = -radius; k <= radius; k++)
-        exp(-(k * k) / (2 * sigma * sigma)),
+      for (var k = -radius; k <= radius; k++) exp(-(k * k) / (2 * sigma * sigma)),
     ];
     final weightSum = weights.reduce((a, b) => a + b);
 

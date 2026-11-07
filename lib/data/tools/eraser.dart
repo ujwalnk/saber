@@ -1,9 +1,6 @@
-import 'dart:async';
+import 'dart:math';
+import 'dart:ui';
 
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:one_dollar_unistroke_recognizer/one_dollar_unistroke_recognizer.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 import 'package:saber/components/canvas/_circle_stroke.dart';
 import 'package:saber/components/canvas/_rectangle_stroke.dart';
@@ -11,307 +8,264 @@ import 'package:saber/components/canvas/_stroke.dart';
 import 'package:saber/data/editor/page.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:saber/data/tools/_tool.dart';
-import 'package:saber/data/tools/highlighter.dart';
-import 'package:saber/data/tools/marker.dart';
-import 'package:saber/data/tools/pencil.dart';
-import 'package:saber/i18n/strings.g.dart';
 import 'package:sbn/tool_id.dart';
 
-class Pen extends Tool {
-  @protected
-  @visibleForTesting
-  new({
-    required this.name,
-    required this.sizeMin,
-    required this.sizeMax,
-    required this.sizeStep,
-    required this.icon,
-    required this.options,
-    required this.pressureEnabled,
-    required this.color,
-    required this.toolId,
-  });
+double square(double x) => x * x;
+double sqrDistanceBetween(Offset p1, Offset p2) =>
+    square(p1.dx - p2.dx) + square(p1.dy - p2.dy);
 
-  new fountainPen()
-    : name = t.editor.pens.fountainPen,
-      sizeMin = 1,
-      sizeMax = 25,
-      sizeStep = 1,
-      icon = fountainPenIcon,
-      options = stows.lastFountainPenOptions.value,
-      pressureEnabled = true,
-      color = Color(stows.lastFountainPenColor.value),
-      toolId = .fountainPen;
+/// What an eraser drag changed.
+typedef EraseResult = ({List<Stroke> erased, List<Stroke> added});
 
-  new ballpointPen()
-    : name = t.editor.pens.ballpointPen,
-      sizeMin = 1,
-      sizeMax = 25,
-      sizeStep = 1,
-      icon = ballpointPenIcon,
-      options = stows.lastBallpointPenOptions.value,
-      pressureEnabled = false,
-      color = Color(stows.lastBallpointPenColor.value),
-      toolId = .ballpointPen;
+class Eraser extends Tool {
+  /// Limits of the size slider (the eraser's radius, in page units).
+  static const double sizeMin = 2;
+  static const double sizeMax = 60;
+  static const double sizeStep = 1;
 
-  final String name;
-  final double sizeMin, sizeMax, sizeStep;
-  late final int sizeStepsBetweenMinAndMax = ((sizeMax - sizeMin) / sizeStep)
-      .round();
-  final Object icon;
+  /// A fixed size, or null to follow [Stows.eraserSize] live.
+  final double? _size;
+
+  /// The eraser's radius in page units.
+  double get size => _size ?? stows.eraserSize.value;
+  double get sqrSize => square(size);
+
+  /// Strokes that were on the page before this drag and have been removed
+  /// (completely, or replaced by the pieces left over).
+  final List<Stroke> _erased = [];
+
+  /// Pieces created during this drag that are still on the page.
+  final Set<Stroke> _added = {};
+
+  new({double? size}) : _size = size;
 
   @override
-  final ToolId toolId;
+  ToolId get toolId => .eraser;
 
-  static const fountainPenIcon = FontAwesomeIcons.penFancy;
-  static const ballpointPenIcon = FontAwesomeIcons.pen;
-
-  static Stroke? currentStroke;
-  Color color;
-  bool pressureEnabled;
-  StrokeOptions options;
-
-  /// The most recently active writing tool of any kind (ink pen, ballpoint,
-  /// pencil, marker, highlighter or shape pen). The toolbar's pen button
-  /// returns to this after another tool (e.g. the eraser) was used.
-  static Pen? lastUsedPen;
-
-  /// The tool the toolbar's pen button activates.
-  static Pen get activePen => lastUsedPen ?? _currentPen;
-
-  static var _currentPen = Pen.fountainPen();
-  static Pen get currentPen => _currentPen;
-  static set currentPen(Pen currentPen) {
-    assert(
-      currentPen is! Highlighter,
-      'Use Highlighter.currentHighlighter instead',
-    );
-    assert(currentPen is! Pencil, 'Use Pencil.currentPencil instead');
-    assert(currentPen is! Marker, 'Use Marker.currentMarker instead');
-    _currentPen = currentPen;
-  }
-
-  void onDragStart(
-    Offset position,
-    EditorPage page,
-    int pageIndex,
-    double? pressure,
-  ) {
-    _resetHold();
-    _holdPage = page;
-    currentStroke = Stroke(
-      color: color,
-      pressureEnabled: pressureEnabled,
-      options: options.copyWith(isComplete: false),
-      pageIndex: pageIndex,
-      page: page,
-      toolId: toolId,
-      nib: stows.fountainNibSettings.value,
-    );
-    onDragUpdate(position, pressure);
-  }
-
-  void onDragUpdate(Offset position, double? pressure) {
-    currentStroke?.addPoint(position, pressure);
-    _trackHold(position);
-  }
-
-  Stroke? onDragEnd() {
-    final stroke = currentStroke;
-    currentStroke = null;
-    final heldShape = holdDetectedShape;
-    final heldCurve = holdSmoothedCurve;
-    _resetHold();
-    if (stroke == null) return null;
-
-    stroke
-      ..options.isComplete = true
-      ..markPolygonNeedsUpdating();
-
-    // Strokes are left exactly as drawn, unless the pen was held still at
-    // the end of the stroke (see [_trackHold]) and a shape was recognised.
-    if (heldShape != null) {
-      final snapped = _snapToShape(stroke, heldShape);
-      if (snapped != null) return snapped;
-    } else if (heldCurve != null) {
-      // No shape matched, but the pen was held: smooth the curve.
-      stroke.convertToSmoothCurve();
-    }
-
-    return stroke;
-  }
-
-  // --- Hold to snap -------------------------------------------------------
-
-  /// Whether holding the pen still at the end of a stroke snaps the stroke
-  /// to a shape. The shape pen has its own always-on recognition.
-  @protected
-  bool get snapOnHold => true;
-
-  /// Minimum bounding-box diagonal (logical pixels) for a stroke to be
-  /// considered for shape snapping. Filters out dots and tiny marks.
-  static const _minShapeSnapDiagonal = 24.0;
-
-  /// Minimum $1 recognizer score (0.0-1.0) to snap.
-  static const _minShapeSnapScore = 0.7;
-
-  /// How far (logical pixels) the pen may drift and still count as "held
-  /// still". Absorbs stylus / hand jitter.
-  static const _holdMoveTolerance = 5.0;
-
-  /// The shape the current stroke will snap to when the pen is lifted, or
-  /// null if the stroke will be kept as drawn. Drawn as a preview.
-  static RecognizedUnistroke? holdDetectedShape;
-
-  /// Set instead of [holdDetectedShape] when the held stroke is not a known
-  /// shape: the smoothed curve the stroke will be replaced with.
-  static List<Offset>? holdSmoothedCurve;
-
-  /// A line is only snapped to if the stroke really is nearly straight
-  /// (deviation from the chord, as a fraction of the chord's length).
-  /// Anything more curved than this is smoothed into a curve instead.
-  static const _maxLineChordDeviation = 0.05;
-
-  static Timer? _holdTimer;
-  static Offset? _holdAnchor;
-  static EditorPage? _holdPage;
-
-  /// The configured hold time, or null if hold-to-snap is turned off.
-  static Duration? get holdDelay {
-    if (!stows.holdToSnapDelay.loaded) return null;
-    final ms = stows.holdToSnapDelay.value;
-    return ms < 0 ? null : Duration(milliseconds: ms);
-  }
-
-  /// Called for every point. While the pen stays within
-  /// [_holdMoveTolerance] of [_holdAnchor] the timer keeps running; moving
-  /// further drops any pending snap and restarts the wait.
-  void _trackHold(Offset position) {
-    if (!snapOnHold) return;
-    final delay = holdDelay;
-    if (delay == null) return;
-
-    final anchor = _holdAnchor;
-    if (anchor != null && (position - anchor).distance <= _holdMoveTolerance) {
-      return; // still holding
-    }
-
-    _holdAnchor = position;
-    _holdTimer?.cancel();
-    if (holdDetectedShape != null || holdSmoothedCurve != null) {
-      holdDetectedShape = null;
-      holdSmoothedCurve = null;
-      _holdPage?.redrawStrokes();
-    }
-    _holdTimer = Timer(delay, _onHold);
-  }
-
-  static void _onHold() {
-    final stroke = currentStroke;
-    if (stroke == null) return;
-    if (stroke.boundingBoxDiagonal < _minShapeSnapDiagonal) return;
-
-    final detected = stroke.detectShape();
-    final isShape =
-        detected != null &&
-        detected.name != null &&
-        detected.score >= _minShapeSnapScore &&
-        // a gentle curve can score well as a line: only snap real lines
-        (detected.name != DefaultUnistrokeNames.line ||
-            stroke.chordDeviationRatio <= _maxLineChordDeviation);
-
-    if (isShape) {
-      holdSmoothedCurve = null;
-      holdDetectedShape = detected;
-    } else {
-      // Not a known shape: smooth the curve instead.
-      final curve = stroke.smoothedCurve();
-      if (curve == null) return;
-      holdDetectedShape = null;
-      holdSmoothedCurve = curve;
-    }
-    HapticFeedback.selectionClick();
-    _holdPage?.redrawStrokes();
-  }
-
-  static void _resetHold() {
-    _holdTimer?.cancel();
-    _holdTimer = null;
-    _holdAnchor = null;
-    holdDetectedShape = null;
-    holdSmoothedCurve = null;
-  }
-
-  /// Drops any pending hold-to-snap (e.g. when a stroke is abandoned).
-  static void cancelHold() {
-    final hadShape = holdDetectedShape != null || holdSmoothedCurve != null;
-    _resetHold();
-    if (hadShape) _holdPage?.redrawStrokes();
-  }
-
-  /// Replaces [stroke] with the clean version of [detected]. The result
-  /// matches the preview drawn while holding.
-  Stroke? _snapToShape(Stroke stroke, RecognizedUnistroke detected) {
-    switch (detected.name) {
-      case DefaultUnistrokeNames.line:
-        if (stroke.points.length < 2) return null;
-        return stroke..convertToLine();
-      case DefaultUnistrokeNames.rectangle:
-        return RectangleStroke(
-          color: color,
-          pressureEnabled: pressureEnabled,
-          options: stroke.options,
-          pageIndex: stroke.pageIndex,
-          page: stroke.page,
-          toolId: toolId,
-          rect: detected.convertToRect(),
-        );
-      case DefaultUnistrokeNames.circle:
-        final (center, radius) = detected.convertToCircle();
-        return CircleStroke(
-          color: color,
-          pressureEnabled: pressureEnabled,
-          options: stroke.options,
-          pageIndex: stroke.pageIndex,
-          page: stroke.page,
-          toolId: toolId,
-          radius: radius,
-          center: center,
-        );
-      case DefaultUnistrokeNames.triangle:
-      case DefaultUnistrokeNames.star:
-        return Stroke(
-          color: color,
-          pressureEnabled: pressureEnabled,
-          options: stroke.options,
-          pageIndex: stroke.pageIndex,
-          page: stroke.page,
-          toolId: toolId,
-          nib: stroke.nib,
-        )..addPoints(detected.convertToCanonicalPolygon());
-      default:
-        return null;
-    }
-  }
-
-  /// The default stroke options.
+  /// Erases whatever is under the eraser as it moves from [from] to [to].
   ///
-  /// Note that these are different to the default options in [StrokeOptions]
-  /// e.g. [StrokeOptions.defaultSize] for historical reasons
-  /// (i.e. [StrokeOptions.toJson] does not include default values.)
-  static final defaultOptions = StrokeOptions(size: 5);
+  /// By default only the touched part of each stroke is removed: the stroke
+  /// is cut and the untouched pieces stay. With
+  /// [Stows.eraseWholeStrokes] the whole stroke goes instead.
+  void erase(Offset from, Offset to, EditorPage page) {
+    final wholeStrokes = stows.eraseWholeStrokes.value;
 
-  // Matches the pen_pal prototype: smoothing 0.5, streamline 0.35.
-  static StrokeOptions get fountainPenOptions =>
-      defaultOptions.copyWith(smoothing: 0.5, streamline: 0.35);
-  static StrokeOptions get ballpointPenOptions => defaultOptions.copyWith();
-  static StrokeOptions get shapePenOptions =>
-      defaultOptions.copyWith(smoothing: 0, streamline: 0);
-  static StrokeOptions get highlighterOptions =>
-      defaultOptions.copyWith(size: 50);
-  static StrokeOptions get pencilOptions => defaultOptions.copyWith(
-    streamline: 0.1,
-    start: StrokeEndOptions.start(taperEnabled: true, customTaper: 1),
-    end: StrokeEndOptions.end(taperEnabled: true, customTaper: 1),
-  );
+    // iterate over a copy: we modify page.strokes as we go
+    for (final stroke in List<Stroke>.of(page.strokes)) {
+      final List<Stroke>? pieces;
+      if (wholeStrokes) {
+        pieces = _shouldStrokeBeErased(to, stroke, sqrSize) ? const [] : null;
+      } else if (stroke is RectangleStroke || stroke is CircleStroke) {
+        // Shapes are cut like any other stroke: only the touched part of
+        // the outline goes, the rest is left as plain ink.
+        pieces = _cut(_outlineOf(stroke), from, to, size, closed: true);
+      } else if (stroke.runtimeType == Stroke) {
+        pieces = _cut(stroke, from, to, size);
+      } else {
+        pieces = _shouldStrokeBeErased(to, stroke, sqrSize) ? const [] : null;
+      }
+      if (pieces == null) continue; // untouched
+
+      page.strokes.remove(stroke);
+      if (!_added.remove(stroke)) _erased.add(stroke);
+      for (final piece in pieces) {
+        page.insertStroke(piece);
+        _added.add(piece);
+      }
+    }
+  }
+
+  /// Returns what this drag erased (original strokes) and what replaced it
+  /// (the pieces left over), then resets.
+  EraseResult onDragEnd() {
+    final result = (erased: List.of(_erased), added: List.of(_added));
+    _erased.clear();
+    _added.clear();
+    return result;
+  }
+
+  /// Cuts [stroke] where the eraser (a circle of [radius] swept from [from]
+  /// to [to]) touches it. Returns the pieces that remain, or null if the
+  /// eraser doesn't touch the stroke at all.
+  ///
+  /// If [closed], the stroke's last point joins back up with its first, so
+  /// the two leftover ends there are merged into one piece.
+  static List<Stroke>? _cut(
+    Stroke stroke,
+    Offset from,
+    Offset to,
+    double radius, {
+    bool closed = false,
+  }) {
+    if (stroke.points.isEmpty) return null;
+
+    // The ink extends half the stroke size beyond its centre line, so cut
+    // that much further out: what's left must not poke into the eraser.
+    final reach = radius + stroke.options.size / 2;
+
+    // quick reject using the stroke's bounds
+    final bounds = stroke.lowQualityPath.getBounds().inflate(reach);
+    if (!bounds.contains(from) && !bounds.contains(to)) {
+      final sweep = Rect.fromPoints(from, to);
+      if (!bounds.overlaps(sweep.inflate(0.5))) return null;
+    }
+
+    final points = _resample(stroke.points, max(1.0, reach / 2));
+
+    final sqrReach = square(reach);
+    final erased = [
+      for (final p in points) _sqrDistanceToSegment(p, from, to) <= sqrReach,
+    ];
+    if (!erased.contains(true)) return null;
+
+    // keep the runs of points that weren't erased
+    final runs = <List<PointVector>>[];
+    var run = <PointVector>[];
+    void endRun() {
+      if (run.isNotEmpty) runs.add(run);
+      run = <PointVector>[];
+    }
+
+    for (var i = 0; i < points.length; i++) {
+      if (erased[i]) {
+        endRun();
+      } else {
+        run.add(points[i]);
+      }
+    }
+    endRun();
+
+    // The first and last points of a closed outline are the same spot, so
+    // the runs touching them are really one run.
+    if (closed && runs.length >= 2 && !erased.first && !erased.last) {
+      final last = runs.removeLast();
+      runs.first.insertAll(0, last);
+    }
+
+    return [
+      for (final run in runs)
+        // a single leftover point would just be a speck
+        if (run.length >= 2)
+          stroke.copy()
+            ..points.clear()
+            ..points.addAll(run)
+            ..markPolygonNeedsUpdating(),
+    ];
+  }
+
+  /// A plain [Stroke] tracing the outline of a [RectangleStroke] or
+  /// [CircleStroke], with the same colour, tool and thickness, so that it
+  /// can be cut like freehand ink. The outline is closed: it ends where it
+  /// started.
+  static Stroke _outlineOf(Stroke shape) {
+    final List<Offset> outline;
+    if (shape is RectangleStroke) {
+      final r = shape.rect;
+      outline = [
+        r.topLeft,
+        r.topRight,
+        r.bottomRight,
+        r.bottomLeft,
+        r.topLeft,
+      ];
+    } else {
+      final circle = shape as CircleStroke;
+      final segments = max(
+        48,
+        min(720, (2 * pi * circle.radius / 4).ceil()),
+      );
+      outline = [
+        for (var i = 0; i <= segments; i++)
+          circle.center +
+              Offset(
+                cos(i / segments * 2 * pi),
+                sin(i / segments * 2 * pi),
+              ) *
+                  circle.radius,
+      ];
+    }
+
+    // Uniform width, no tapering: it should look like the shape it came from.
+    final options = shape.options.copyWith(
+      simulatePressure: false,
+      start: StrokeEndOptions.start(taperEnabled: false),
+      end: StrokeEndOptions.end(taperEnabled: false),
+    );
+    options.isComplete = true;
+
+    return Stroke(
+      color: shape.color,
+      pressureEnabled: shape.pressureEnabled,
+      options: options,
+      pageIndex: shape.pageIndex,
+      page: shape.page,
+      toolId: shape.toolId,
+    )..points.addAll([
+        for (final o in outline) PointVector(o.dx, o.dy, 0.5),
+      ]);
+  }
+
+  /// Adds points along any segment longer than [maxGap], so that cutting at
+  /// a point cuts close to where the eraser actually is.
+  static List<PointVector> _resample(List<PointVector> points, double maxGap) {
+    final result = <PointVector>[points.first];
+    for (var i = 1; i < points.length; i++) {
+      final a = points[i - 1];
+      final b = points[i];
+      final distance = (Offset(b.dx, b.dy) - Offset(a.dx, a.dy)).distance;
+      final steps = (distance / maxGap).ceil();
+      for (var s = 1; s < steps; s++) {
+        final t = s / steps;
+        result.add(
+          PointVector(
+            a.dx + (b.dx - a.dx) * t,
+            a.dy + (b.dy - a.dy) * t,
+            a.pressure == null || b.pressure == null
+                ? a.pressure
+                : a.pressure! + (b.pressure! - a.pressure!) * t,
+          ),
+        );
+      }
+      result.add(b);
+    }
+    return result;
+  }
+
+  static double _sqrDistanceToSegment(Offset p, Offset a, Offset b) {
+    final ab = b - a;
+    final lengthSquared = ab.dx * ab.dx + ab.dy * ab.dy;
+    if (lengthSquared == 0) return sqrDistanceBetween(p, a);
+    final t = (((p - a).dx * ab.dx + (p - a).dy * ab.dy) / lengthSquared).clamp(
+      0.0,
+      1.0,
+    );
+    return sqrDistanceBetween(p, a + ab * t);
+  }
+
+  static bool _shouldStrokeBeErased(
+    Offset eraserPos,
+    Stroke stroke,
+    double sqrSize,
+  ) {
+    if (stroke.length <= 3) {
+      if (stroke.lowQualityPath.contains(eraserPos)) return true;
+    }
+
+    /// skip checking every few vertices for performance
+    final int verticesToSkip = switch (stroke.lowQualityPolygon.length) {
+      < 100 => 0,
+      < 1000 => 1,
+      _ => 2,
+    };
+
+    for (
+      int i = 0;
+      i < stroke.lowQualityPolygon.length;
+      i += verticesToSkip + 1
+    ) {
+      final Offset strokeVertex = stroke.lowQualityPolygon[i];
+      if (sqrDistanceBetween(strokeVertex, eraserPos) <= sqrSize) return true;
+    }
+    return false;
+  }
 }
