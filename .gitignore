@@ -70,3 +70,5 @@ coverage/
 # Local build outputs
 android/build/
 lib.zip
+project-context.zip
+.gitignore
