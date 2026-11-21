@@ -6,7 +6,7 @@ import 'package:saber/data/webdav/webdav_sync.dart';
 /// Settings for syncing notes with any WebDAV server: the location of the
 /// folder, a username and a password.
 class WebDavSettings extends StatefulWidget {
-  const WebDavSettings({super.key});
+  const new({super.key});
 
   @override
   State<WebDavSettings> createState() => _WebDavSettingsState();
@@ -16,8 +16,8 @@ class _WebDavSettingsState extends State<WebDavSettings> {
   final _url = TextEditingController();
   final _username = TextEditingController();
   final _password = TextEditingController();
-  bool _loaded = false;
-  bool _showPassword = false;
+  var _loaded = false;
+  var _showPassword = false;
 
   @override
   void initState() {

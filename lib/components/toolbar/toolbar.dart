@@ -26,7 +26,6 @@ import 'package:saber/data/tools/laser_pointer.dart';
 import 'package:saber/data/tools/pen.dart';
 import 'package:saber/data/tools/pencil.dart';
 import 'package:saber/data/tools/select.dart';
-import 'package:saber/data/tools/shape_pen.dart';
 import 'package:saber/i18n/strings.g.dart';
 
 class Toolbar extends StatefulWidget {
@@ -521,7 +520,7 @@ class _ToolbarState extends State<Toolbar> {
           onLongPress: enabled
               ? () {
                   final replaced = List<String>.of(quickColors);
-                  replaced[index] = currentColor!
+                  replaced[index] = currentColor
                       .withAlpha(255)
                       .toARGB32()
                       .toString();

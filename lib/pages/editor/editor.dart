@@ -28,7 +28,6 @@ import 'package:saber/components/editor/read_only_banner.dart';
 import 'package:saber/components/theming/adaptive_alert_dialog.dart';
 import 'package:saber/components/theming/adaptive_icon.dart';
 import 'package:saber/components/theming/dynamic_material_app.dart';
-import 'package:saber/components/theming/saber_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:saber/components/toolbar/photo_crop_page.dart';
 import 'package:saber/components/toolbar/samsung_panel.dart';

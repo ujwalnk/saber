@@ -16,7 +16,7 @@ import 'package:sbn/tool_id.dart';
 /// options and (for the ink pen) nib settings. These are the pens listed
 /// under "Favourites" in the pen popup.
 class PenPreset {
-  const PenPreset({
+  const new({
     required this.id,
     required this.name,
     required this.tool,

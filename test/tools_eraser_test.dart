@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 import 'package:saber/components/canvas/_stroke.dart';
+import 'package:saber/data/editor/page.dart';
+import 'package:saber/data/prefs.dart';
 import 'package:saber/data/tools/eraser.dart';
 import 'package:sbn/has_size.dart';
+import 'package:sbn/tool_id.dart';
 
 final _options = StrokeOptions(
   size: 1, // small size so we have more precision in test
@@ -13,6 +16,13 @@ final _options = StrokeOptions(
 const _eraserPos = Offset(50, 50);
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    stows.eraseWholeStrokes.value = true;
+    stows.eraseHighlighterOnly.value = false;
+  });
+
   test('Test that the eraser tool erases the correct strokes', () {
     final eraser = Eraser(size: 10);
 
@@ -52,47 +62,67 @@ void main() {
       _strokeWithPoint(_eraserPos + const Offset(2, 0) * eraser.size),
     ];
 
-    final strokes = <Stroke>[...strokesToErase, ...strokesToKeep];
-    final List<Stroke> erased = eraser.checkForOverlappingStrokes(
-      _eraserPos,
-      strokes,
+    final page = EditorPage(
+      size: const Size(100, 100),
+      strokes: [...strokesToErase, ...strokesToKeep],
+    );
+    eraser.erase(_eraserPos, _eraserPos, page);
+    final result = eraser.onDragEnd();
+
+    expect(
+      result.added,
+      isEmpty,
+      reason: 'Erasing whole strokes should not leave any pieces behind',
+    );
+    expect(
+      result.erased.length,
+      strokesToErase.length,
+      reason: 'The correct number of strokes should have been erased',
     );
 
     for (final stroke in strokesToErase) {
       expect(
-        erased,
+        result.erased,
         contains(stroke),
         reason: 'Stroke should be erased: $stroke',
       );
+      expect(page.strokes, isNot(contains(stroke)));
     }
 
     for (final stroke in strokesToKeep) {
       expect(
-        erased,
+        result.erased,
         isNot(contains(stroke)),
         reason: 'Stroke should not be erased: $stroke',
       );
+      expect(page.strokes, contains(stroke));
     }
+  });
 
-    final List<Stroke> erasedStrokes = eraser.onDragEnd();
-    expect(
-      erasedStrokes.length,
-      strokesToErase.length,
-      reason: 'The correct number of strokes should have been erased',
+  test('Test that "only erase highlighter" leaves other strokes alone', () {
+    stows.eraseHighlighterOnly.value = true;
+    final eraser = Eraser(size: 10);
+
+    final pen = _strokeWithPoint(_eraserPos);
+    final highlighter = _strokeWithPoint(_eraserPos, toolId: .highlighter);
+    final page = EditorPage(
+      size: const Size(100, 100),
+      strokes: [pen, highlighter],
     );
-    expect(
-      erasedStrokes,
-      everyElement(strokesToErase.contains),
-      reason: 'The correct strokes should have been erased',
-    );
+
+    eraser.erase(_eraserPos, _eraserPos, page);
+    final result = eraser.onDragEnd();
+
+    expect(result.erased, [highlighter]);
+    expect(page.strokes, [pen]);
   });
 }
 
-Stroke _strokeWithPoint(Offset point) => Stroke(
+Stroke _strokeWithPoint(Offset point, {ToolId toolId = .fountainPen}) => Stroke(
   color: Stroke.defaultColor,
   pressureEnabled: Stroke.defaultPressureEnabled,
   options: _options,
   pageIndex: 0,
   page: const HasSize(Size(100, 100)),
-  toolId: .fountainPen,
+  toolId: toolId,
 )..addPoint(point);
