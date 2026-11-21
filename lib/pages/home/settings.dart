@@ -20,6 +20,7 @@ import 'package:saber/components/settings/settings_switch.dart';
 import 'package:saber/components/toolbar/sticker_picker.dart';
 import 'package:saber/components/toolbar/toolbar_customize_dialog.dart';
 import 'package:saber/components/settings/update_manager.dart';
+import 'package:saber/components/settings/webdav_settings.dart';
 import 'package:saber/components/theming/adaptive_alert_dialog.dart';
 import 'package:saber/components/theming/adaptive_toggle_buttons.dart';
 import 'package:saber/components/theming/saber_theme.dart';
@@ -173,6 +174,7 @@ class _SettingsPageState extends State<SettingsPage> {
             sliver: SliverList.list(
               children: [
                 const NextcloudProfile(),
+                const WebDavSettings(),
                 const Padding(padding: .all(8), child: AppInfo()),
                 SettingsSubtitle(subtitle: t.settings.prefCategories.general),
                 SettingsDropdown(

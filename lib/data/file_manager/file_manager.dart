@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:saber/components/home/sort_button.dart';
 import 'package:saber/data/nextcloud/saber_syncer.dart';
+import 'package:saber/data/webdav/webdav_sync.dart';
 import 'package:saber/data/prefs.dart';
 import 'package:saber/i18n/strings.g.dart';
 import 'package:saber/pages/editor/editor.dart';
@@ -264,7 +265,10 @@ class FileManager {
 
     void afterWrite() {
       broadcastFileWrite(FileOperationType.write, filePath);
-      if (alsoUpload) syncer.uploader.enqueueRel(filePath);
+      if (alsoUpload) {
+        syncer.uploader.enqueueRel(filePath);
+        WebDavSync.instance.scheduleSync();
+      }
       if (filePath.endsWith(Editor.extension)) {
         _removeReferences(
           '${filePath.substring(0, filePath.length - Editor.extension.length)}'
@@ -405,6 +409,7 @@ class FileManager {
 
     syncer.uploader.enqueueRel(fromPath);
     syncer.uploader.enqueueRel(toPath);
+    WebDavSync.instance.scheduleSync();
 
     _renameReferences(fromPath, toPath);
     _migrateNoteCoverColor(fromPath, toPath);
@@ -516,7 +521,10 @@ class FileManager {
     if (!file.existsSync()) return;
     await file.delete();
 
-    if (alsoUpload) syncer.uploader.enqueueRel(filePath);
+    if (alsoUpload) {
+      syncer.uploader.enqueueRel(filePath);
+      WebDavSync.instance.scheduleSync();
+    }
 
     _removeReferences(filePath);
     _removeNoteCoverColor(filePath);

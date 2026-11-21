@@ -245,6 +245,33 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// WebDAV sync (see `WebDavSync`).
+  final webdavEnabled = PlainStow(
+    'webdavEnabled',
+    false,
+    volatile: !_isOnMainIsolate,
+  );
+
+  /// The WebDAV folder the notes are synced with.
+  final webdavUrl = SecureStow('webdavUrl', '', volatile: !_isOnMainIsolate);
+  final webdavUsername = SecureStow(
+    'webdavUsername',
+    '',
+    volatile: !_isOnMainIsolate,
+  );
+  final webdavPassword = SecureStow(
+    'webdavPassword',
+    '',
+    volatile: !_isOnMainIsolate,
+  );
+
+  /// What was in sync last time, as JSON. Internal to `WebDavSync`.
+  final webdavState = PlainStow(
+    'webdavState',
+    '{}',
+    volatile: !_isOnMainIsolate,
+  );
+
   /// The user's favourite pens (see `PenPreset`), each as a JSON string.
   final penPresets = PlainStow(
     'penPresets',
