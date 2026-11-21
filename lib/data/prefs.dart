@@ -245,6 +245,13 @@ class Stows {
     volatile: !_isOnMainIsolate,
   );
 
+  /// The user's favourite pens (see `PenPreset`), each as a JSON string.
+  final penPresets = PlainStow(
+    'penPresets',
+    <String>[],
+    volatile: !_isOnMainIsolate,
+  );
+
   /// Names of every `ToolbarItem`, in the order they appear in the toolbar.
   final toolbarItemOrder = PlainStow(
     'toolbarItemOrder',
