@@ -6,6 +6,7 @@ import 'package:saber/components/canvas/_canvas_background_painter.dart';
 import 'package:saber/components/canvas/_canvas_painter.dart';
 import 'package:saber/components/canvas/_stroke.dart';
 import 'package:saber/components/canvas/canvas_image.dart';
+import 'package:saber/components/canvas/canvas_text_box.dart';
 import 'package:saber/components/canvas/image/editor_image.dart';
 import 'package:saber/data/editor/editor_core_info.dart';
 import 'package:saber/data/extensions/color_extensions.dart';
@@ -24,6 +25,7 @@ class InnerCanvas extends StatefulWidget {
     required this.height,
     this.showPageIndicator = true,
     this.textEditing = false,
+    this.textBoxMode = false,
     required this.coreInfo,
     required this.currentStroke,
     required this.currentStrokeDetectedShape,
@@ -40,6 +42,10 @@ class InnerCanvas extends StatefulWidget {
   final double height;
   final bool showPageIndicator;
   final bool textEditing;
+
+  /// When [textEditing], whether text goes into movable text boxes
+  /// (true) or into the text of the entire page (false).
+  final bool textBoxMode;
   final EditorCoreInfo coreInfo;
   final Stroke? currentStroke;
   final RecognizedUnistroke? currentStrokeDetectedShape;
@@ -172,7 +178,10 @@ class _InnerCanvasState extends State<InnerCanvas> {
                 width: widget.width,
                 height: widget.height,
                 child: IgnorePointer(
-                  ignoring: widget.coreInfo.readOnly || !widget.textEditing,
+                  ignoring:
+                      widget.coreInfo.readOnly ||
+                      !widget.textEditing ||
+                      widget.textBoxMode,
                   child: quillEditor,
                 ),
               ),
@@ -191,6 +200,29 @@ class _InnerCanvasState extends State<InnerCanvas> {
                         ) ??
                         false,
                   ),
+              Positioned.fill(
+                child: ListenableBuilder(
+                  listenable: page.textBoxesRevision,
+                  builder: (context, _) => Stack(
+                    children: [
+                      for (final box in page.textBoxes)
+                        CanvasTextBox(
+                          key: ObjectKey(box),
+                          box: box,
+                          pageSize: Size(widget.width, widget.height),
+                          editing:
+                              widget.textEditing &&
+                              widget.textBoxMode &&
+                              !widget.coreInfo.readOnly,
+                          invert: invert,
+                          lineHeight: widget.coreInfo.lineHeight,
+                          secondaryColor: colorScheme.secondary,
+                          currentScale: widget.currentScale,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),

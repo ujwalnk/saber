@@ -49,12 +49,21 @@ class EditorPage extends ChangeNotifier implements HasSize {
   final List<EditorImage> images;
   final QuillStruct quill;
 
+  /// Movable text boxes placed on this page (separate from [quill], which
+  /// is the text that flows over the entire page).
+  final List<TextBoxData> textBoxes;
+
+  /// Bumped whenever a text box is added to or removed from [textBoxes],
+  /// so the canvas can rebuild just that layer.
+  final ValueNotifier<int> textBoxesRevision = ValueNotifier(0);
+
   EditorImage? backgroundImage;
 
   bool get isEmpty =>
       strokes.isEmpty &&
       images.isEmpty &&
       quill.controller.document.isEmpty() &&
+      textBoxes.every((box) => box.quill.controller.document.isEmpty()) &&
       backgroundImage == null;
   bool get isNotEmpty => !isEmpty;
 
@@ -88,6 +97,11 @@ class EditorPage extends ChangeNotifier implements HasSize {
           .length;
       maxY = max(maxY, linesOfText * lineHeight * 1.5); // ×1.5 fudge factor
     }
+    for (final box in textBoxes) {
+      if (box.quill.controller.document.isEmpty()) continue;
+      final lines = box.quill.controller.document.toPlainText().split('\n');
+      maxY = max(maxY, box.position.dy + lines.length * lineHeight * 1.5);
+    }
 
     /// The uncropped height of the page.
     /// In lots of cases, this is [Editor.defaultHeight].
@@ -107,6 +121,7 @@ class EditorPage extends ChangeNotifier implements HasSize {
     List<Stroke>? strokes,
     List<EditorImage>? images,
     QuillStruct? quill,
+    List<TextBoxData>? textBoxes,
     this.backgroundImage,
   }) : assert(
          (size == null) || (width == null && height == null),
@@ -116,6 +131,7 @@ class EditorPage extends ChangeNotifier implements HasSize {
        strokes = strokes ?? [],
        laserStrokes = [],
        images = images ?? [],
+       textBoxes = textBoxes ?? [],
        quill =
            quill ??
            QuillStruct(
@@ -157,6 +173,10 @@ class EditorPage extends ChangeNotifier implements HasSize {
             : QuillController.basic(),
         focusNode: FocusNode(debugLabel: 'Quill Focus Node'),
       ),
+      textBoxes: [
+        for (final box in (json['tb'] as List?) ?? const [])
+          TextBoxData.fromJson(box as Map<String, dynamic>),
+      ],
       backgroundImage: json['b'] != null
           ? parseImageJson(
               json['b'],
@@ -178,6 +198,11 @@ class EditorPage extends ChangeNotifier implements HasSize {
       'i': images.map((image) => image.toJson(assets)).toList(),
     if (!quill.controller.document.isEmpty())
       'q': quill.controller.document.toDelta().toJson(),
+    if (textBoxes.any((box) => !box.quill.controller.document.isEmpty()))
+      'tb': [
+        for (final box in textBoxes)
+          if (!box.quill.controller.document.isEmpty()) box.toJson(),
+      ],
     if (backgroundImage != null) 'b': backgroundImage?.toJson(assets),
   };
 
@@ -283,6 +308,10 @@ class EditorPage extends ChangeNotifier implements HasSize {
   @override
   void dispose() {
     quill.dispose();
+    for (final box in textBoxes) {
+      box.dispose();
+    }
+    textBoxesRevision.dispose();
     _pencilShader?.dispose();
     isRendered = false;
     for (final image in images) {
@@ -300,6 +329,10 @@ class EditorPage extends ChangeNotifier implements HasSize {
   /// exclusive to the cloned page.
   void disposeClonedData() {
     quill.dispose();
+    for (final box in textBoxes) {
+      box.dispose();
+    }
+    textBoxesRevision.dispose();
     _pencilShader?.dispose();
     isRendered = false;
     super.dispose();
@@ -310,12 +343,14 @@ class EditorPage extends ChangeNotifier implements HasSize {
     List<Stroke>? strokes,
     List<EditorImage>? images,
     QuillStruct? quill,
+    List<TextBoxData>? textBoxes,
     EditorImage? backgroundImage,
   }) => EditorPage(
     size: size ?? this.size,
     strokes: strokes ?? this.strokes,
     images: images ?? this.images,
     quill: quill ?? this.quill,
+    textBoxes: textBoxes ?? this.textBoxes,
     backgroundImage: backgroundImage ?? this.backgroundImage,
   );
 
@@ -332,6 +367,7 @@ class EditorPage extends ChangeNotifier implements HasSize {
           ? strokes
           : strokes.where(EditorExporter.shouldRasterizeStroke).toList(),
       quill: quill.cloneForScreenshot(),
+      textBoxes: [for (final box in textBoxes) box.cloneForScreenshot()],
     );
   }
 }
@@ -356,4 +392,98 @@ class QuillStruct {
     ),
     focusNode: FocusNode(debugLabel: 'Screenshot Quill Focus Node'),
   );
+}
+
+/// A movable box of rich text placed at a fixed spot on a page.
+class TextBoxData extends ChangeNotifier {
+  static const double minWidth = 120;
+  static const double defaultWidth = 360;
+
+  Offset _position;
+  Offset get position => _position;
+
+  double _width;
+  double get width => _width;
+
+  final QuillStruct quill;
+
+  /// Called when the text, position or width changed (so it can be saved).
+  VoidCallback? onChanged;
+
+  /// Called when this box's text field gains focus.
+  void Function(TextBoxData box)? onFocused;
+
+  /// Called when the user asks to delete this box.
+  void Function(TextBoxData box)? onDelete;
+
+  new({
+    required Offset position,
+    double width = defaultWidth,
+    QuillStruct? quill,
+  }) : _position = position,
+       _width = max(minWidth, width),
+       quill =
+           quill ??
+           QuillStruct(
+             controller: QuillController.basic(),
+             focusNode: FocusNode(debugLabel: 'Text Box Focus Node'),
+           ) {
+    this.quill.changeSubscription = this.quill.controller.changes.listen(
+      (_) => onChanged?.call(),
+    );
+    this.quill.focusNode.addListener(() {
+      if (this.quill.focusNode.hasFocus) onFocused?.call(this);
+    });
+  }
+
+  factory fromJson(Map<String, dynamic> json) => TextBoxData(
+    position: Offset(
+      (json['x'] as num?)?.toDouble() ?? 0,
+      (json['y'] as num?)?.toDouble() ?? 0,
+    ),
+    width: (json['w'] as num?)?.toDouble() ?? defaultWidth,
+    quill: QuillStruct(
+      controller: json['q'] != null
+          ? QuillController(
+              document: Document.fromJson(json['q'] as List),
+              selection: const TextSelection.collapsed(offset: 0),
+            )
+          : QuillController.basic(),
+      focusNode: FocusNode(debugLabel: 'Text Box Focus Node'),
+    ),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'x': position.dx,
+    'y': position.dy,
+    'w': width,
+    'q': quill.controller.document.toDelta().toJson(),
+  };
+
+  void moveTo(Offset position) {
+    if (position == _position) return;
+    _position = position;
+    notifyListeners();
+    onChanged?.call();
+  }
+
+  void resizeTo(double width) {
+    width = max(minWidth, width);
+    if (width == _width) return;
+    _width = width;
+    notifyListeners();
+    onChanged?.call();
+  }
+
+  TextBoxData cloneForScreenshot() => TextBoxData(
+    position: position,
+    width: width,
+    quill: quill.cloneForScreenshot(),
+  );
+
+  @override
+  void dispose() {
+    quill.dispose();
+    super.dispose();
+  }
 }

@@ -49,9 +49,13 @@ class Eraser extends Tool {
   /// [Stows.eraseWholeStrokes] the whole stroke goes instead.
   void erase(Offset from, Offset to, EditorPage page) {
     final wholeStrokes = stows.eraseWholeStrokes.value;
+    final highlighterOnly = stows.eraseHighlighterOnly.value;
 
     // iterate over a copy: we modify page.strokes as we go
     for (final stroke in List<Stroke>.of(page.strokes)) {
+      // "Only erase highlighter": leave everything else untouched
+      if (highlighterOnly && stroke.toolId != .highlighter) continue;
+
       final List<Stroke>? pieces;
       if (wholeStrokes) {
         pieces = _shouldStrokeBeErased(to, stroke, sqrSize) ? const [] : null;

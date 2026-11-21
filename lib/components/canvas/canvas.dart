@@ -18,6 +18,7 @@ class Canvas extends StatelessWidget {
     required this.page,
     required this.pageIndex,
     required this.textEditing,
+    this.textBoxMode = false,
     required this.coreInfo,
     required this.currentStroke,
     required this.currentStrokeDetectedShape,
@@ -33,6 +34,7 @@ class Canvas extends StatelessWidget {
   final int pageIndex;
 
   final bool textEditing;
+  final bool textBoxMode;
   final EditorCoreInfo coreInfo;
   final Stroke? currentStroke;
   final RecognizedUnistroke? currentStrokeDetectedShape;
@@ -121,6 +123,7 @@ class Canvas extends StatelessWidget {
                       width: page.size.width,
                       height: page.size.height,
                       textEditing: textEditing,
+                      textBoxMode: textBoxMode,
                       coreInfo: coreInfo,
                       currentStroke: currentStroke,
                       currentStrokeDetectedShape: currentStrokeDetectedShape,

@@ -39,6 +39,7 @@ class Toolbar extends StatefulWidget {
     required this.quillFocus,
     required this.textEditing,
     required this.toggleTextEditing,
+    required this.startTextEditing,
     required this.toggleFingerDrawing,
     required this.pickSticker,
     required this.paste,
@@ -57,6 +58,10 @@ class Toolbar extends StatefulWidget {
   final ValueNotifier<QuillStruct?> quillFocus;
   final bool textEditing;
   final VoidCallback toggleTextEditing;
+
+  /// Starts text editing, either in a new movable text box ([textBox]) or
+  /// in the text of the entire page.
+  final void Function({required bool textBox}) startTextEditing;
 
   final VoidCallback toggleFingerDrawing;
 
@@ -349,6 +354,57 @@ class _ToolbarState extends State<Toolbar> {
   }
 
   /// A toolbar glyph: outlined normally, filled while its tool is selected.
+  /// Pressing the text button while editing text stops editing. Otherwise
+  /// it asks whether to add a movable text box or type on the entire page.
+  Future<void> _onTextPressed(BuildContext context) async {
+    if (widget.textEditing) {
+      widget.toggleTextEditing();
+      return;
+    }
+
+    final button = context.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (button == null || overlay == null) {
+      widget.startTextEditing(textBox: false);
+      return;
+    }
+    final topLeft = button.localToGlobal(Offset.zero, ancestor: overlay);
+    final position = RelativeRect.fromLTRB(
+      topLeft.dx,
+      topLeft.dy + button.size.height,
+      overlay.size.width - topLeft.dx - button.size.width,
+      overlay.size.height - topLeft.dy - button.size.height,
+    );
+
+    final textBox = await showMenu<bool>(
+      context: context,
+      position: position,
+      items: const [
+        PopupMenuItem(
+          value: true,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.crop_free),
+            title: Text('Create textbox'),
+          ),
+        ),
+        PopupMenuItem(
+          value: false,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.article_outlined),
+            title: Text('Entire page'),
+          ),
+        ),
+      ],
+    );
+    if (textBox == null) return;
+    widget.startTextEditing(textBox: textBox);
+  }
+
   Widget _toolIcon(IconData icon, {bool selected = false}) {
     return Icon(icon, fill: selected ? 1 : 0);
   }
@@ -798,13 +854,18 @@ class _ToolbarState extends State<Toolbar> {
         ),
       ],
       ToolbarItem.text: [
-        ToolbarIconButton(
-          tooltip: t.editor.toolbar.text,
-          selected: widget.textEditing,
-          enabled: !widget.readOnly,
-          onPressed: widget.toggleTextEditing,
-          padding: buttonPadding,
-          child: _toolIcon(Symbols.text_fields, selected: widget.textEditing),
+        Builder(
+          builder: (context) => ToolbarIconButton(
+            tooltip: t.editor.toolbar.text,
+            selected: widget.textEditing,
+            enabled: !widget.readOnly,
+            onPressed: () => _onTextPressed(context),
+            padding: buttonPadding,
+            child: _toolIcon(
+              Symbols.text_fields,
+              selected: widget.textEditing,
+            ),
+          ),
         ),
       ],
       ToolbarItem.fingerDrawing: [

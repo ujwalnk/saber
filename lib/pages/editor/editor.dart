@@ -1071,6 +1071,9 @@ class EditorState extends State<Editor> {
 
     for (int pageIndex = 0; pageIndex < coreInfo.pages.length; pageIndex++) {
       listenToQuillChanges(coreInfo.pages[pageIndex].quill, pageIndex);
+      for (final box in coreInfo.pages[pageIndex].textBoxes) {
+        _wireTextBox(coreInfo.pages[pageIndex], box);
+      }
     }
 
     if (coreInfo.isEmpty) {
@@ -1707,6 +1710,103 @@ class EditorState extends State<Editor> {
       coreInfo.pages[image.pageIndex].images.remove(image);
     });
     autosaveAfterDelay();
+  }
+
+  /// Whether text editing types into movable text boxes (true) or into the
+  /// text of the entire page (false).
+  bool _textBoxMode = false;
+
+  /// Starts text editing: either adds a new movable text box to the current
+  /// page, or types on the entire page (as before).
+  void _startTextEditing({required bool textBox}) => setState(() {
+    if (coreInfo.readOnly) return;
+    _textBoxMode = textBox;
+    currentTool = Tool.textEditing;
+
+    final page = coreInfo.pages[currentPageIndex];
+    if (textBox) {
+      _addTextBox(page);
+    } else {
+      quillFocus.value = page.quill..focusNode.requestFocus();
+    }
+  });
+
+  void _wireTextBox(EditorPage page, TextBoxData box) {
+    box.onChanged = () {
+      if (coreInfo.readOnly) return;
+      autosaveAfterDelay();
+    };
+    box.onFocused = (box) => quillFocus.value = box.quill;
+    box.onDelete = (box) => _deleteTextBox(page, box);
+  }
+
+  /// Adds an empty text box in the middle of what's currently on screen
+  /// (or near the top of the page if that can't be worked out).
+  void _addTextBox(EditorPage page) {
+    final width = min(TextBoxData.defaultWidth, page.size.width * 0.6);
+    var position = Offset(
+      (page.size.width - width) / 2,
+      page.size.height * 0.15,
+    );
+
+    final renderBox = page.renderBox;
+    if (renderBox != null && renderBox.attached) {
+      final screen = MediaQuery.sizeOf(context);
+      final center = renderBox.globalToLocal(
+        Offset(screen.width / 2, screen.height / 2),
+      );
+      position = Offset(
+        center.dx - width / 2,
+        center.dy - coreInfo.lineHeight * 2,
+      );
+    }
+    position = Offset(
+      position.dx.clamp(0.0, max(0.0, page.size.width - width)),
+      position.dy.clamp(0.0, max(0.0, page.size.height - 120)),
+    );
+
+    final box = TextBoxData(position: position, width: width);
+    _wireTextBox(page, box);
+    page.textBoxes.add(box);
+    page.textBoxesRevision.value++;
+
+    quillFocus.value = box.quill;
+    // wait for the box to be built before focusing it
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (box.quill.focusNode.canRequestFocus) box.quill.focusNode.requestFocus();
+    });
+    autosaveAfterDelay();
+  }
+
+  void _deleteTextBox(EditorPage page, TextBoxData box) {
+    if (coreInfo.readOnly) return;
+    if (!page.textBoxes.remove(box)) return;
+    if (quillFocus.value == box.quill) quillFocus.value = null;
+    setState(() {});
+    page.textBoxesRevision.value++;
+    // the box's editor is still mounted until the next frame
+    WidgetsBinding.instance.addPostFrameCallback((_) => box.dispose());
+    autosaveAfterDelay();
+  }
+
+  /// Removes text boxes nobody typed anything into.
+  void _removeEmptyTextBoxes() {
+    for (final page in coreInfo.pages) {
+      final empty = page.textBoxes
+          .where((box) => box.quill.controller.document.isEmpty())
+          .toList();
+      if (empty.isEmpty) continue;
+      for (final box in empty) {
+        page.textBoxes.remove(box);
+        if (quillFocus.value == box.quill) quillFocus.value = null;
+      }
+      page.textBoxesRevision.value++;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final box in empty) {
+          box.dispose();
+        }
+      });
+    }
   }
 
   void listenToQuillChanges(QuillStruct quill, int pageIndex) {
@@ -2512,9 +2612,11 @@ class EditorState extends State<Editor> {
             },
             quillFocus: quillFocus,
             textEditing: currentTool == Tool.textEditing,
+            startTextEditing: _startTextEditing,
             toggleTextEditing: () => setState(() {
               if (currentTool == Tool.textEditing) {
                 currentTool = Pen.activePen;
+                _removeEmptyTextBoxes();
                 for (final page in coreInfo.pages) {
                   // unselect text, but maintain cursor position
                   page.quill.controller.moveCursorToPosition(
@@ -2523,9 +2625,7 @@ class EditorState extends State<Editor> {
                   page.quill.focusNode.unfocus();
                 }
               } else {
-                currentTool = Tool.textEditing;
-                quillFocus.value = coreInfo.pages[currentPageIndex].quill
-                  ..focusNode.requestFocus();
+                _startTextEditing(textBox: false);
               }
             }),
             toggleFingerDrawing: () {
@@ -3023,6 +3123,7 @@ class EditorState extends State<Editor> {
       page: page,
       pageIndex: pageIndex,
       textEditing: currentTool == Tool.textEditing,
+      textBoxMode: _textBoxMode,
       coreInfo: coreInfo,
       currentStroke: currentStroke,
       currentStrokeDetectedShape:
@@ -3082,10 +3183,16 @@ class EditorState extends State<Editor> {
             ),
             focusNode: FocusNode(debugLabel: 'Quill Focus Node'),
           ),
+          textBoxes: [
+            for (final box in page.textBoxes) box.cloneForScreenshot(),
+          ],
           backgroundImage: page.backgroundImage?.copy()?..pageIndex += 1,
         );
         coreInfo.pages.insert(pageIndex + 1, newPage);
         listenToQuillChanges(newPage.quill, pageIndex + 1);
+        for (final box in newPage.textBoxes) {
+          _wireTextBox(newPage, box);
+        }
         history.recordChange(
           HistoricPageInsert(
             pageIndex: pageIndex,
